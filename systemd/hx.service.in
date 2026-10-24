@@ -1,0 +1,13 @@
+[Unit]
+Description=hx watcher (trk asks to herdr, console and needs-you queue)
+
+[Service]
+Environment=PATH=@BINDIR@:%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=HERDR_SESSION=default
+Environment=HX_CONFIG=@CONFIG@
+ExecStart=@HX@ watch
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

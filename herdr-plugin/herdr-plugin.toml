@@ -1,0 +1,8 @@
+# hx's herdr plugin. It runs nothing: it exists because herdr accepts an Agents-panel view
+# (agent.view.set) only from an enabled plugin, and the hx watcher sets one every pass so the
+# panel lists the panes that need you (src/hx/sidebar.py). Linked by install.sh.
+id = "hx"
+name = "hx"
+version = "0.1.0"
+min_herdr_version = "0.9.1"
+description = "hx: herdr's Agents panel as the needs-you list"

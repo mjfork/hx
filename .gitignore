@@ -1,0 +1,10 @@
+*.pyc
+.superpowers/
+.venv/
+__pycache__/
+docs/plan/*.artifact.html
+docs/plan/*.packed.html
+tmp/
+.worktrees/
+dist/
+*.bundle
