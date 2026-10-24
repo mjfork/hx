@@ -3,8 +3,11 @@ and `hx answer`. A card is one live pane's item (herdr-jump's queue) with its "#
 section parsed into asks; hx's own hx_<ask>.json items are left out, because trk shows those asks.
 
 The parser is strict: a section off the async turn format (Ask / Options / Reply with / Unblocks)
-gives no asks, and the page shows the raw text. A reply is tappable only when it is a literal one:
-never one that starts with "!" (Claude runs it as a shell command) or one with a <placeholder>.
+gives no asks, and the page shows the raw text. Two forms agents write often are on it: a label on an
+ask (`**Ask 1 (tr-ab12c):**`), and a Reply with that quotes no literal reply, which is a free-text
+ask ("your answer in pane w9B:p1"): the page gives it a text box. A reply is tappable only when it
+is a literal one: never one that starts with "!" (Claude runs it as a shell command) or one with a
+<placeholder>.
 
 `answer` types a reply only into the ask the card showed: the item must still be there with the
 same text (its sha), the pane must run the same session, and both are checked again right before
@@ -26,7 +29,7 @@ from hx.state import state_dir
 
 ANSWERED_KEEP_S = 86400      # how long hx remembers that it answered an ask
 
-FIELD = re.compile(r"^\*\*(Ask(?: (\d+))?|Options|Reply with|Unblocks):\*\*\s*(.*)$")
+FIELD = re.compile(r"^\*\*(Ask|Options|Reply with|Unblocks)(?: (\d+))?(?: \(([^()]{1,60})\))?:\*\*\s*(.*)$")
 OPTION = re.compile(r"^(\d+)\.\s+(.*)$")
 LITERAL = re.compile(r"`([^`]+)`")
 
@@ -56,27 +59,28 @@ def _tap(reply: str) -> bool:
     return _unsafe(reply) is None and not re.search(r"<[^>]+>", reply)
 
 
-def _ask(n: int, lines: dict, options: list) -> dict | None:
-    if not lines.get("ask") or "reply" not in lines:
+def _ask(n: int, label: str, lines: dict, options: list) -> dict | None:
+    if not lines.get("ask") or not lines.get("reply"):
+        return None
+    if [o["n"] for o in options] != list(range(1, len(options) + 1)):
         return None
     replies = LITERAL.findall(lines["reply"])
-    if not replies or [o["n"] for o in options] != list(range(1, len(options) + 1)):
-        return None
     prose = set(re.sub(r"\bor\b", "", LITERAL.sub("", lines["reply"]))) - set(" ,")
-    return {"n": n, "ask": lines["ask"], "options": options,       # prose: a quoted word may not be a reply
+    return {"n": n, "label": label, "ask": lines["ask"], "options": options,  # prose: a quoted word may not be a reply
             "reply_with": [{"text": r, "tap": not prose and _tap(r)} for r in replies],
+            "free_text": "" if replies else lines["reply"],   # no literal reply: what to write, in the agent's words
             "unblocks": lines.get("unblocks", "")}
 
 
 def parse(text: str) -> list[dict] | None:
     """The asks of a Needs-you section, or None when any part is off the format."""
     out: list[dict] = []
-    cur: dict | None = None            # {"n", "lines": {field: text}, "options": [...], "at": field}
+    cur: dict | None = None            # {"n", "label", "lines": {field: text}, "options": [...], "at": field}
 
     def close() -> bool:
         if cur is None:
             return True
-        a = _ask(cur["n"], cur["lines"], cur["options"])
+        a = _ask(cur["n"], cur["label"], cur["lines"], cur["options"])
         if a is None or any(x["n"] == a["n"] for x in out):
             return False
         out.append(a)
@@ -90,14 +94,14 @@ def parse(text: str) -> list[dict] | None:
             return None                                      # a heading or code: past the format
         m = FIELD.match(line)
         if m:
-            name, num, rest = m.groups()
-            if name.startswith("Ask"):
+            name, num, label, rest = m.groups()
+            if name == "Ask":
                 if not close():
                     return None
-                cur = {"n": int(num) if num else len(out) + 1, "lines": {"ask": rest}, "options": [],
-                       "at": "ask"}
+                cur = {"n": int(num) if num else len(out) + 1, "label": (label or "").strip(),
+                       "lines": {"ask": rest}, "options": [], "at": "ask"}
                 continue
-            if cur is None:
+            if cur is None or num or label:                  # only an ask has a number or a label
                 return None
             key = {"Options": "options", "Reply with": "reply", "Unblocks": "unblocks"}[name]
             if key in cur["lines"]:

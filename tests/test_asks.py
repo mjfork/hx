@@ -68,8 +68,20 @@ def test_two_asks_with_options_and_wrapped_lines():
 
 def test_a_single_unnumbered_ask_is_ask_1():
     got = asks.parse("**Ask:** Grant wiki access?\n**Reply with:** `done`\n**Unblocks:** publishing")
-    assert got == [{"n": 1, "ask": "Grant wiki access?", "options": [],
-                    "reply_with": [{"text": "done", "tap": True}], "unblocks": "publishing"}]
+    assert got == [{"n": 1, "label": "", "ask": "Grant wiki access?", "options": [],
+                    "reply_with": [{"text": "done", "tap": True}], "free_text": "", "unblocks": "publishing"}]
+
+
+def test_an_ask_may_carry_a_label():
+    got = asks.parse("**Ask 1 (tr-ht6qk):** Per page?\n**Reply with:** `1`\n\n**Ask (urgent):** Push?\n**Reply with:** `yes`")
+    assert [(a["n"], a["label"]) for a in got] == [(1, "tr-ht6qk"), (2, "urgent")]
+
+
+def test_a_reply_with_no_literal_is_a_free_text_ask():
+    got = asks.parse("**Ask:** Which cap did you approve?\n**Options:**\n1. 0.01 kg/s\n2. 2e-3 x mean flow\n"
+                     "**Reply with:** the cap, in your words\n**Unblocks:** tr-xrn2m")
+    assert got[0]["reply_with"] == [] and got[0]["free_text"] == "the cap, in your words"
+    assert [o["n"] for o in got[0]["options"]] == [1, 2]
 
 
 @pytest.mark.parametrize("reply", ["! ~/x/rollout.sh", "  !rm -rf tmp", 'trk answer tr-ab12c --outcome "<one line>"'])
@@ -82,7 +94,9 @@ def test_shell_and_placeholder_replies_are_never_tappable(reply):
     "",
     "Some words before any ask\n**Ask:** x?\n**Reply with:** `1`",       # stray text first
     "**Ask:** x?\n**Unblocks:** y",                                          # no Reply with
-    "**Ask:** x?\n**Reply with:** type anything",                            # no literal reply
+    "**Ask:** x?\n**Reply with:**",                                          # an empty Reply with
+    "**Ask:** x?\n**Options (2):**\n1. a\n**Reply with:** `1`",              # a label on another field
+    "**Ask:** x?\n**Reply with 2:** `1`",                                     # a number on another field
     "**Ask:** x?\n**Options:**\n1. a\n3. b\n**Reply with:** `1`",            # options skip a number
     "**Ask:** x?\n**Colour:** red\n**Reply with:** `1`",                     # an unknown field
     "**Ask 1:** x?\n**Reply with:** `1`\n**Ask 1:** y?\n**Reply with:** `2`",  # a repeated number
