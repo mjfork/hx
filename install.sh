@@ -34,7 +34,7 @@ Options:
   --dry-run       print what would happen and change nothing
   --uninstall     remove what install.sh added; config and state are never touched
   --no-editable   install a copy of hx (and the skill), not links to this checkout
-  --no-service    do not install or start the systemd user service
+  --no-service    do not install or start the watcher service (systemd; launchd on macOS)
   --no-sidebar    leave herdr's config.toml alone: no needs-you list in the Agents panel
   --force         reinstall the hx command even if uv already has it, and replace a skill that
                   differs from the repo copy (the old one is kept as <name>.bak-<time>)
@@ -93,6 +93,7 @@ CLAUDE_DIR=$HOME/.claude
 SETTINGS=$CLAUDE_DIR/settings.json
 BIN_DIR=$HOME/.local/bin
 UNIT_DIR=$CONFIG_HOME/systemd/user
+AGENT=$HOME/Library/LaunchAgents/com.hx.watch.plist     # the watcher on macOS, where there is no systemctl
 STATE_HOME=${XDG_STATE_HOME:-$HOME/.local/state}
 CONFIG=${HX_CONFIG:-$CONFIG_HOME/hx/config.toml}   # where hx itself looks
 # Written only when this script installs the uv tool, so --uninstall removes only what it added.
@@ -119,7 +120,7 @@ skill_state() { # linked | same | differs | dangling | absent for one skill
 
 check_skills() { # refuse to replace a skill that differs from the repo copy, unless --force
   local s differing=()
-  for s in "${SKILLS[@]}"; do [[ $(skill_state "$s") == differs ]] && differing+=("$s"); done
+  for s in ${SKILLS[@]+"${SKILLS[@]}"}; do [[ $(skill_state "$s") == differs ]] && differing+=("$s"); done
   ((${#differing[@]})) || return 0
   say "== skills that differ from the repo copy: ${differing[*]}"
   if ((FORCE)); then
@@ -138,14 +139,15 @@ put_skill() { # and remember that this script put it there, so --uninstall remov
   ((DRY)) || { mkdir -p "$MARKS" && { ((EDITABLE)) && : || tree_hash "$CLAUDE_DIR/skills/$1"; } >"$MARKS/skill-$1"; }
 }
 
-tree_hash() { (cd "$1" && find . -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1); }
+SHA=(sha256sum); command -v sha256sum >/dev/null || SHA=(shasum -a 256)   # macOS has only shasum
+tree_hash() { (cd "$1" && find . -type f -print0 | sort -z | xargs -0 "${SHA[@]}" | "${SHA[@]}" | cut -d' ' -f1); }
 
 install_skills() {
   say "== skills"
   local s stamp
   stamp=$(date -u +%Y%m%dT%H%M%SZ)
   act mkdir -p "$CLAUDE_DIR/skills"
-  for s in "${SKILLS[@]}"; do
+  for s in ${SKILLS[@]+"${SKILLS[@]}"}; do
     case $(skill_state "$s") in
       linked) if ((EDITABLE)); then say "skill $s: already installed (linked to this checkout)"
         else say "skill $s: replacing the link with a copy"; act rm "$CLAUDE_DIR/skills/$s"; put_skill "$s"; fi ;;
@@ -165,7 +167,7 @@ install_skills() {
 uninstall_skills() {
   say "== skills"
   local s
-  for s in "${SKILLS[@]}"; do
+  for s in ${SKILLS[@]+"${SKILLS[@]}"}; do
     local dest=$CLAUDE_DIR/skills/$s state mine=0
     state=$(skill_state "$s")
     if [[ -e $MARKS/skill-$s ]]; then
@@ -192,7 +194,7 @@ bin_state() { # linked | same | differs | dangling | absent for one of scripts/ 
 
 check_bins() { # refuse to replace a script that differs from the repo copy, unless --force
   local b differing=()
-  for b in "${BINS[@]}"; do [[ $(bin_state "$b") == differs ]] && differing+=("$b"); done
+  for b in ${BINS[@]+"${BINS[@]}"}; do [[ $(bin_state "$b") == differs ]] && differing+=("$b"); done
   ((${#differing[@]})) || return 0
   say "== scripts in $BIN_DIR that differ from the repo copy: ${differing[*]}"
   if ((FORCE)); then
@@ -207,7 +209,7 @@ check_bins() { # refuse to replace a script that differs from the repo copy, unl
 put_bin() { # and remember that this script put it there, so --uninstall removes only its own
   if ((EDITABLE)); then act ln -s "$REPO/scripts/$1" "$BIN_DIR/$1"
   else act cp -p "$REPO/scripts/$1" "$BIN_DIR/$1"; fi
-  ((DRY)) || { mkdir -p "$MARKS" && { ((EDITABLE)) && : || sha256sum <"$BIN_DIR/$1" | cut -d' ' -f1; } >"$MARKS/bin-$1"; }
+  ((DRY)) || { mkdir -p "$MARKS" && { ((EDITABLE)) && : || "${SHA[@]}" <"$BIN_DIR/$1" | cut -d' ' -f1; } >"$MARKS/bin-$1"; }
 }
 
 install_bins() {
@@ -216,7 +218,7 @@ install_bins() {
   local b dest stamp
   stamp=$(date -u +%Y%m%dT%H%M%SZ)
   act mkdir -p "$BIN_DIR"
-  for b in "${BINS[@]}"; do
+  for b in ${BINS[@]+"${BINS[@]}"}; do
     dest=$BIN_DIR/$b
     case $(bin_state "$b") in
       linked) if ((EDITABLE)); then say "$b: already installed (linked to this checkout)"
@@ -239,7 +241,7 @@ install_bins() {
 
 uninstall_bins() {
   local b dest state mine
-  for b in "${ALL_BINS[@]}"; do
+  for b in ${ALL_BINS[@]+"${ALL_BINS[@]}"}; do
     dest=$BIN_DIR/$b mine=0
     state=$(bin_state "$b")
     [[ $state == absent && ! -e $MARKS/bin-$b ]] && continue      # never asked for: nothing to say
@@ -247,7 +249,7 @@ uninstall_bins() {
     if [[ -e $MARKS/bin-$b ]]; then
       case $state in
         linked | same | dangling) mine=1 ;;
-        differs) [[ ! -L $dest && $(sha256sum <"$dest" | cut -d' ' -f1) == "$(cat "$MARKS/bin-$b")" ]] && mine=1 ;;
+        differs) [[ ! -L $dest && $("${SHA[@]}" <"$dest" | cut -d' ' -f1) == "$(cat "$MARKS/bin-$b")" ]] && mine=1 ;;
       esac
     fi
     if [[ $state == absent ]]; then say "$b: not installed"; act rm -f "$MARKS/bin-$b"
@@ -268,36 +270,37 @@ FRESH_HOOK=(--hook SessionStart "" "$REPO/claude/hooks/checkout-freshness.sh")
 settings_cmd() { # add|remove, then --hook EVENT MATCHER COMMAND triples
   local flags=()
   ((DRY)) && flags+=(--dry-run)
-  python3 "$REPO/scripts/merge_settings.py" "$@" --settings "$SETTINGS" "${flags[@]}"
+  [[ -n $PY ]] || find_python || die "python 3.12 or newer is required"
+  "$PY" "$REPO/scripts/merge_settings.py" "$@" --settings "$SETTINGS" ${flags[@]+"${flags[@]}"}
 }
 
 wanted_hooks() { # the --hook triples the options asked for, one word per line
-  ((MEM_GATE)) && printf '%s\n' "${MEM_HOOK[@]}"
-  ((FRESHNESS)) && printf '%s\n' "${FRESH_HOOK[@]}"
+  ((MEM_GATE)) && printf '%s\n' ${MEM_HOOK[@]+"${MEM_HOOK[@]}"}
+  ((FRESHNESS)) && printf '%s\n' ${FRESH_HOOK[@]+"${FRESH_HOOK[@]}"}
   return 0
 }
 
 check_settings() { # before any change: settings.json can take the hooks asked for
-  local hooks=()
-  mapfile -t hooks < <(wanted_hooks)
+  local hooks=() l
+  while IFS= read -r l; do hooks+=("$l"); done < <(wanted_hooks)   # no mapfile: macOS has bash 3.2
   ((${#hooks[@]})) || return 0
-  python3 "$REPO/scripts/merge_settings.py" add --settings "$SETTINGS" --dry-run "${hooks[@]}" >/dev/null ||
+  "$PY" "$REPO/scripts/merge_settings.py" add --settings "$SETTINGS" --dry-run ${hooks[@]+"${hooks[@]}"} >/dev/null ||
     die "$SETTINGS cannot take the hooks (see above); nothing was changed"
 }
 
 install_hooks() {
-  local hooks=()
-  mapfile -t hooks < <(wanted_hooks)
+  local hooks=() l
+  while IFS= read -r l; do hooks+=("$l"); done < <(wanted_hooks)   # no mapfile: macOS has bash 3.2
   ((${#hooks[@]})) || return 0
   say "== Claude Code hooks"
   command -v jq >/dev/null || warn "jq is not on PATH; the hooks need it, and without it they let everything through"
-  settings_cmd add "${hooks[@]}"
+  settings_cmd add ${hooks[@]+"${hooks[@]}"}
 }
 
 uninstall_hooks() { # removes only hx's own entries, whichever options installed them
   [[ -e $SETTINGS ]] || return 0
   say "== Claude Code hooks"
-  settings_cmd remove "${MEM_HOOK[@]}" "${FRESH_HOOK[@]}" ||
+  settings_cmd remove ${MEM_HOOK[@]+"${MEM_HOOK[@]}"} ${FRESH_HOOK[@]+"${FRESH_HOOK[@]}"} ||
     warn "$SETTINGS could not be read, so hx's hooks are still in it; remove them by hand"
 }
 
@@ -331,11 +334,20 @@ check_actor() { # before any change: a new config names $ME as a trk actor
     die "'$ME' cannot be a trk actor (lowercase letters, digits and -, not starting with -); pick one with --me NAME"
 }
 
+# The first python 3.12+ on PATH: python3, else a versioned one (macOS puts its own 3.9 python3 first).
+PY=
+find_python() {
+  local c
+  for c in python3 python3.14 python3.13 python3.12; do
+    command -v "$c" >/dev/null && "$c" -c 'import sys; sys.exit(sys.version_info < (3, 12))' 2>/dev/null &&
+      { PY=$c; return 0; }
+  done
+  return 1
+}
+
 check_prereqs() {
   say "== checks"
-  command -v python3 >/dev/null || die "python 3.12 or newer is required; python3 is not on PATH"
-  python3 -c 'import sys; sys.exit(sys.version_info < (3, 12))' ||
-    die "python 3.12 or newer is required; found $(python3 --version 2>&1)"
+  find_python || die "python 3.12 or newer is required; found $(python3 --version 2>&1 || echo 'no python3 on PATH')"
   command -v uv >/dev/null || die "uv is required (https://docs.astral.sh/uv/); it is not on PATH"
   command -v trk >/dev/null || die "trk is required: hx reads its work and asks from trk. Install trk first (its own ./install.sh)."
   command -v herdr >/dev/null || die "herdr is required: hx opens Spaces and wakes panes in herdr. Install herdr first."
@@ -345,7 +357,7 @@ check_prereqs() {
   if grep -qs '"eng-toolkit@' "$CLAUDE_DIR/plugins/installed_plugins.json"; then
     say "eng-toolkit found: hx-work hands JIRA tickets' gates to it"
   else say "eng-toolkit not found: hx-work runs the trk gates itself"; fi
-  say "python3, uv, trk and herdr found"
+  say "$PY, uv, trk and herdr found"
 }
 
 tool_installed() { grep -q "^${1:-hx} " <<<"$(uv tool list 2>/dev/null)"; }   # no pipe: grep -q exits early, and pipefail would see uv fail
@@ -354,7 +366,8 @@ move_folder() { # herdr-extension's folder becomes hx's, once; a folder already 
   local old=$1 new=$2
   [[ -d $old ]] || return 0
   if [[ -e $new ]]; then say "$new exists, so hx uses it; $old is left as it is"
-  else say "moving $old to $new"; act mv -T "$old" "$new"; fi     # -T: never into a new that just appeared
+  elif mv --version >/dev/null 2>&1; then say "moving $old to $new"; act mv -T "$old" "$new"   # -T: never into a new that just appeared
+  else say "moving $old to $new"; act mv "$old" "$new"; fi   # macOS mv has no -T; $new was checked just above
 }
 
 replace_old_service() { # stop the herdr-extension unit, so one watcher runs, not two
@@ -379,7 +392,7 @@ install_tool() {
     # tool and its watcher as they were; uv's uninstall then deletes the hx link, so link it again.
     # uv's own uninstall would delete the hx link with it, so the old tool's folder goes instead.
     say "replacing the $OLD uv tool with hx"
-    act uv "${args[@]}" --force "$REPO"
+    act uv ${args[@]+"${args[@]}"} --force "$REPO"
     local tools
     tools=$(uv tool dir 2>/dev/null) || tools=
     if [[ -n $tools && -f $tools/$OLD/uv-receipt.toml ]]; then act rm -rf "${tools:?}/$OLD"
@@ -392,7 +405,7 @@ install_tool() {
   if tool_installed && ! ((FORCE)); then
     say "hx is already installed (use --force to reinstall)"
   else
-    act uv "${args[@]}" "$REPO"
+    act uv ${args[@]+"${args[@]}"} "$REPO"
     if ((DRY)); then say "[dry-run] record that this script installed hx"
     else mkdir -p "$(dirname "$MARKER")" && printf '%s\n' "$REPO" >"$MARKER"; fi
   fi
@@ -448,9 +461,9 @@ install_config() {
 hx_bin() { printf '%s/hx\n' "$(uv tool dir --bin 2>/dev/null || printf '%s' "$HOME/.local/bin")"; }
 
 tool_dirs() { # hx's directory, then those of trk, herdr, claude and claude-worker as found now
-  local dirs=() d c seen=: found=()
-  mapfile -t found < <(command -v trk herdr claude claude-worker 2>/dev/null)   # one path per line
-  for c in "$1" "${found[@]}"; do
+  local dirs=() d c seen=: found=() l
+  while IFS= read -r l; do found+=("$l"); done < <(command -v trk herdr claude claude-worker 2>/dev/null)   # one path per line
+  for c in "$1" ${found[@]+"${found[@]}"}; do
     d=$(dirname "$c")
     [[ $seen == *":$d:"* ]] && continue
     if [[ $d =~ [[:space:]\"\'\\%\$:] ]]; then
@@ -474,10 +487,37 @@ render_unit() {
   printf '%s' "${tpl//@HX@/$hx}"
 }
 
+launchd() { # HX_SERVICE_MANAGER=launchd|systemd overrides the guess (tests use it)
+  case ${HX_SERVICE_MANAGER:-} in launchd) return 0 ;; systemd) return 1 ;; esac
+  ! command -v systemctl >/dev/null && [[ $(uname -s) == Darwin ]]
+}
+
+install_agent() { # macOS: the watcher as a launchd agent that starts at login and restarts if it stops
+  local hx=$1 tpl log=$STATE_HOME/hx/watch.log
+  if ((DRY)); then
+    say "[dry-run] write $AGENT ($hx watch) and launchctl bootout and bootstrap gui/$(id -u)/com.hx.watch"
+    return
+  fi
+  [[ $hx$CONFIG$HOME =~ [\&\<\>] ]] && die "a path for the launchd agent has & < or >; install somewhere simpler or use --no-service"
+  tpl=$(cat "$REPO/launchd/hx.plist.in"; printf x)
+  tpl=${tpl%x}
+  tpl=${tpl//@BINDIR@/$(tool_dirs "$hx")}
+  tpl=${tpl//@HOME@/$HOME}
+  tpl=${tpl//@CONFIG@/$CONFIG}
+  tpl=${tpl//@LOG@/$log}
+  mkdir -p "$(dirname "$AGENT")" "$(dirname "$log")" "$MARKS"
+  printf '%s' "${tpl//@HX@/$hx}" >"$AGENT.new" && mv "$AGENT.new" "$AGENT"
+  touch "$MARKS/service"
+  launchctl bootout "gui/$(id -u)/com.hx.watch" 2>/dev/null || true   # one start: also picks up a new hx
+  launchctl bootstrap "gui/$(id -u)" "$AGENT"
+  say "service started: launchctl print gui/$(id -u)/com.hx.watch   (log: $log)"
+}
+
 install_service() {
   say "== watcher service"
   local hx
   hx=$(hx_bin)
+  if launchd; then install_agent "$hx"; return; fi
   if ((DRY)); then
     say "[dry-run] write $UNIT_DIR/$UNIT (ExecStart=$hx watch)"
     say "[dry-run] systemctl --user daemon-reload, enable and restart hx"
@@ -499,6 +539,14 @@ install_service() {
 
 uninstall_service() {
   say "== watcher service"
+  if [[ -e $AGENT ]]; then
+    if [[ ! -e $MARKS/service ]]; then say "$AGENT was not written by this script; leaving it alone"; return; fi
+    if ((DRY)); then say "[dry-run] unload hx, delete $AGENT"; return; fi
+    launchctl bootout "gui/$(id -u)/com.hx.watch" 2>/dev/null || true
+    rm -f "$AGENT" "$MARKS/service"
+    say "launchd agent removed"
+    return
+  fi
   if [[ ! -e $UNIT_DIR/$UNIT ]]; then say "no unit installed"; return; fi
   if [[ ! -e $MARKS/service ]]; then say "$UNIT_DIR/$UNIT was not written by this script; leaving it alone"; return; fi
   if ((DRY)); then say "[dry-run] stop and disable hx, delete $UNIT_DIR/$UNIT"; return; fi

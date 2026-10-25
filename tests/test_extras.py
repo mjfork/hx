@@ -274,3 +274,10 @@ def test_merge_refuses_bad_json_and_dry_run_writes_nothing(tmp_path):
     assert out.returncode != 0 and "not valid JSON" in out.stderr and s.read_text() == "{oops"
     s.write_text("")
     assert "would change" in merge(s, "add", MEM, dry=True).stdout and s.read_text() == ""
+
+
+def test_merge_keeps_non_ascii_text_as_it_was(tmp_path):
+    s = tmp_path / "settings.json"
+    s.write_text(json.dumps({"notes": ["private — local only"]}, ensure_ascii=False), encoding="utf-8")
+    assert merge(s, "add", MEM).returncode == 0
+    assert "private — local only" in s.read_text(encoding="utf-8") and "\\u2014" not in s.read_text(encoding="utf-8")

@@ -2,6 +2,7 @@
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -29,6 +30,8 @@ def box(tmp_path):
     home.mkdir(); bin.mkdir()
     for name, body in {"uv": UV, "trk": STUB, "herdr": STUB, "systemctl": STUB, "claude": STUB}.items():
         (bin / name).write_text(body); (bin / name).chmod(0o755)
+    (bin / "python3").write_text(f"#!/bin/sh\nexec {sys.executable} \"$@\"\n")   # this python, not the box's
+    (bin / "python3").chmod(0o755)
     env = {"HOME": str(home), "USER": "alice", "PATH": f"{bin}:/usr/bin:/bin"}
 
     def run(*args, ok=True):
@@ -611,3 +614,22 @@ def test_uninstall_removes_only_hx_hooks(box):
     box("--mem-gate")
     box("--uninstall")
     assert json.loads(s.read_text()) == mine
+
+
+def test_on_macos_the_watcher_is_a_launchd_agent(box, monkeypatch):
+    (box.bin / "launchctl").write_text(STUB); (box.bin / "launchctl").chmod(0o755)
+    env = {"HOME": str(box.home), "USER": "alice", "PATH": f"{box.bin}:/usr/bin:/bin", "HX_SERVICE_MANAGER": "launchd"}
+    out = subprocess.run(["bash", str(SCRIPT)], capture_output=True, text=True, env=env)
+    assert out.returncode == 0, out.stdout + out.stderr
+    agent = box.home / "Library/LaunchAgents/com.hx.watch.plist"
+    import plistlib
+    d = plistlib.loads(agent.read_bytes())
+    assert d["Label"] == "com.hx.watch" and d["ProgramArguments"] == [f"{box.home}/.local/bin/hx", "watch"]
+    assert d["KeepAlive"] is True and d["EnvironmentVariables"]["HX_CONFIG"] == f"{box.home}/.config/hx/config.toml"
+    assert d["StandardOutPath"] == f"{box.home}/.local/state/hx/watch.log"
+    uid = os.getuid()
+    assert f"launchctl bootstrap gui/{uid} {agent}" in box.calls() and "systemctl" not in box.calls()
+    assert not (box.home / ".config/systemd/user/hx.service").exists()
+    out = subprocess.run(["bash", str(SCRIPT), "--uninstall"], capture_output=True, text=True, env=env)
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert not agent.exists() and f"launchctl bootout gui/{uid}/com.hx.watch" in box.calls()

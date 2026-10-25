@@ -47,8 +47,8 @@ herdr holds the Claude Code sessions. hx is a small background watcher in betwee
 
 | Needs | Why | Check |
 |---|---|---|
-| Linux with systemd (user services) | runs the watcher | `systemctl --user status` |
-| Python 3.12 or newer | hx is Python | `python3 --version` |
+| Linux with systemd (user services), or macOS (launchd) | runs the watcher | `systemctl --user status`; on macOS `launchctl print gui/$(id -u)/com.hx.watch` |
+| Python 3.12 or newer on PATH (`python3`, or `python3.12`–`python3.14`: macOS's own python3 is 3.9) | the installer runs Python | `python3 --version` |
 | [uv](https://docs.astral.sh/uv/) | installs the `hx` command | `uv --version` |
 | trk | the work, the asks and the change feed. Install it first with its own `./install.sh` | `trk --version` |
 | herdr | the Spaces and panes | `herdr --version` |
@@ -109,7 +109,9 @@ The installer:
 5. Points herdr's `config.toml` at the needs-you list (`hx sidebar setup`: the Agents rows,
    `sidebar_width = 34` and the tab bar) and reloads herdr. It backs the file up first and changes
    only those three keys; `--no-sidebar` leaves herdr alone.
-6. Installs and starts the watcher as the systemd user service `hx`.
+6. Installs and starts the watcher as the systemd user service `hx`. On macOS, which has no systemd,
+   it is the launchd agent `~/Library/LaunchAgents/com.hx.watch.plist`, logging to
+   `~/.local/state/hx/watch.log`.
 
 Four extras are off unless you ask for them. They are for a box that runs many sessions at once,
 and need Linux (the guard reads `/proc` and uses `flock`) and `jq` (the hooks):
@@ -169,7 +171,7 @@ found, run `uv tool update-shell` and open a new shell.
 1. Check that the watcher is up and sees your trk store:
 
    ```bash
-   systemctl --user status hx
+   systemctl --user status hx    # macOS: launchctl print gui/$(id -u)/com.hx.watch
    hx reconcile --dry-run        # prints the actions one pass would take, and takes none
    ```
 
@@ -350,7 +352,7 @@ With the default editable install:
 
 ```bash
 cd ~/src/hx && git pull     # or: git pull /path/to/new.bundle
-systemctl --user restart hx
+systemctl --user restart hx     # macOS: launchctl kickstart -k gui/$(id -u)/com.hx.watch
 ```
 
 With `--no-editable`, run `./install.sh --no-editable --force --no-service` after the pull, then restart the
@@ -408,7 +410,7 @@ The tests need `trk` on PATH. The design, its amendments and the implementation 
 | `src/hx/` | the package: `cli` (commands), `reconcile` (one pass), `routing`, `replies`, `spaces` (pure decisions), `feed`, `tracker`, `herdr`, `channels`, `state`, `start` |
 | `src/hx/contract/` | the copy of trk's JSON contract that hx checks replies against |
 | `claude/skills/hx-work/` | the skill a solo session runs |
-| `systemd/` | the service unit template the installer fills in |
+| `systemd/`, `launchd/` | the service templates the installer fills in (Linux, macOS) |
 | `install.sh` | install, uninstall, make-bundle |
 | `scripts/sync-contract.sh` | refresh the contract copy from a trk checkout |
 | `scripts/launch-guard.sh` | says whether the box can take another session (`--launch-guard`) |
