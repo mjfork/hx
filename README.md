@@ -273,7 +273,7 @@ With no config file, asks go to your user name on the console channel only.
 | `hx held [--json]` | exit 0 if held, 1 if not, 2 if the hold file cannot be read (which counts as held) |
 | `hx sidebar setup [--dry-run] [--config PATH]` | point herdr's config.toml at the needs-you sidebar (below): the Agents rows, `sidebar_width = 34` and the tab bar. It backs the file up first and changes only those three keys; `--dry-run` prints the change. `install.sh` runs it, so this is for a rerun or a second config |
 | `hx needs-you --line` | the tab bar's text: `⚑ 3 · tr-z58a0 38` (count, then the top-scored ask), nothing when no one waits, `hx stale` when the watcher has not written for 2 minutes |
-| `hx needs-you --json` | the queue as cards, for a page that answers by tap: one per live pane's item, with its space, session, cache time left, the open trk ask it names (`trk_ask`), its `sha`, and the Needs-you section parsed into asks, options and `reply_with` (each with `tap`: false for a `!` or `/` reply, a `<placeholder>`, prose around the replies, or a reply two asks share). A section off the format gives `asks: null` and only `raw`. hx's own `hx_*` items are left out: trk shows those asks |
+| `hx needs-you --json` | the queue as cards, for a page that answers by tap: one per live pane's item, with its space, session, cache time left, the open trk ask it names (`trk_ask`), its `sha`, and the Needs-you section parsed into asks, options and `reply_with` (each with `tap`: false for a `!` or `/` reply, a `<placeholder>`, prose around the replies, or a reply two asks share). A section off the format gives `asks: null` and only `raw`. hx's own `hx_*` items are left out: trk shows those asks. Each card has a `kind`: `ask`, or `blocked` for a pane held on a dialog with no card of its own, which comes first and has no `asks` and no `sha`, so `hx answer` never types into it |
 | `hx answer <pane> --sha S --session X [--wait 45] "<reply>"` | type a reply into the ask a card showed, by `hx send`'s rule. It refuses a reply that starts with `!` or `/` or holds a control character, an ask it answered already (the same pane, text and time asked; the same words asked again later are a new ask), an item that is gone or whose text changed (its sha), and a pane that runs another session (`--session ''` for a pane with none); it checks the item and session again right before typing. Exit 0 sent, 1 refused, 2 bad --wait |
 
 **The hold file** is `~/.local/state/hx/hold.json`:
@@ -295,7 +295,11 @@ time left (`52m`; `9m!` in bold under 10 minutes; `cold`; `busy` while it works)
 the Space on the line below. The score is trk's urgency base for the ask (`urgency.base` in
 `trk waiting --json`: the items it holds up, ×10 when urgent) times `1 + 9 × (share of the cache
 used)²` while the cache is warm. An item with no trk ask, or before trk gives urgency, is unscored
-and sorts last; ties go to the cache that ends soonest. The watcher sends the rows every pass as
+and sorts last; ties go to the cache that ends soonest. A pane held on a question or permission
+dialog (herdr's `blocked`) with no item gets a `⚑ dialog  open` row above every ask: a dialog stops
+the turn before its Stop hook, so herdr-jump makes no item for it, and the session waits until you
+answer it in the pane. The row goes when the dialog closes; a pane whose turn-mode driver is a live
+agent is left to that driver. The watcher sends the rows every pass as
 pane tokens that live 2 minutes, so if it stops the panel empties and the tab bar says `hx stale`.
 Between passes it looks at the queue's items each second: when one comes or goes (herdr-jump's
 prompt hook deletes a pane's item once you submit a prompt there), it redraws the panel at once.

@@ -6,6 +6,11 @@ The score is trk's urgency base for the ask (tr-qwwsc: held-up items × urgent) 
 bump hx works out from cache-timer's real time left: 1 + 9 × (share of the cache used)², and 1
 once the cache is cold. A row with no trk ask, or no urgency yet, is unscored and sorts last.
 
+A pane held on a question or permission dialog (herdr's "blocked") gets a "dialog" row too, above
+every ask, while it has no queued item: a dialog stops the turn before its Stop hook, so it never
+makes one, and the session does nothing until someone answers. A pane a turn-mode driver runs is
+left to that driver, as herdr-jump does.
+
 Tokens live TTL_MS, so a stopped watcher empties the panel within two minutes.
 """
 import json
@@ -23,6 +28,7 @@ VIEW = {"source": "plugin:hx", "label": "needs you",
                  {"field": {"token": "hx_tie"}, "order": "asc"}]}      # then the cache that ends soonest
 ASK_ID = re.compile(r"(?<![\w-])tr-[0-9a-z]+(?![\w-])")
 NO_TIE = 99999
+TOP_SORT = 999_999     # a dialog's row; a scored row stops one below it
 
 
 @dataclass(frozen=True)
@@ -32,6 +38,7 @@ class Row:
     cache: str             # cache_text()
     score: float | None
     left: float | None     # seconds of cache left; None when unknown or the session is working
+    dialog: bool = False   # held on a dialog, with no queued item
 
 
 def cache_dir() -> Path:
@@ -71,6 +78,34 @@ def factor(left: float | None, ttl_ms: int) -> float:
     return 1 + 9 * used ** 2
 
 
+def mode_dir() -> Path:
+    """turn-mode's per-pane files, the ones herdr-jump reads for a pane's driver."""
+    return Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude") / "ctx/mode"
+
+
+def _driver(pane: str, folder: Path) -> str | None:
+    try:
+        d = json.loads((folder / f"{pane}.json").read_text())
+    except (OSError, ValueError):
+        return None
+    if not isinstance(d, dict) or d.get("mode") != "agentic" or not isinstance(d.get("driver"), str):
+        return None
+    return d["driver"] or None
+
+
+def blocked(panes, folder: Path) -> set[str]:
+    """Live panes held on a dialog that no other live pane drives."""
+    live = {p.pane_id for p in panes}
+    out = set()
+    for p in panes:
+        if p.status != "blocked":
+            continue
+        d = _driver(p.pane_id, folder)
+        if d is None or d == p.pane_id or d not in live:
+            out.add(p.pane_id)
+    return out
+
+
 def _base(ask: dict | None) -> float | None:
     u = (ask or {}).get("urgency")
     b = u.get("base") if isinstance(u, dict) else None
@@ -101,8 +136,10 @@ def match(name: str, item: dict, open_ids) -> str | None:
     return next((m for m in ASK_ID.findall(str(item.get("ask", ""))) if m in open_ids), None)
 
 
-def rows(queue: Path, cache: Path, open_asks: list[dict], live: set[str], now: float) -> dict[str, Row]:
-    """One row per live pane with a queued item; of two items on a pane, the higher score wins."""
+def rows(queue: Path, cache: Path, open_asks: list[dict], live: set[str], now: float,
+         dialogs: set[str] = frozenset()) -> dict[str, Row]:
+    """One row per live pane with a queued item; of two items on a pane, the higher score wins.
+    Then a dialog row for each pane of `dialogs` (see blocked()) that has none."""
     asks = {a["id"]: a for a in open_asks}
     out: dict[str, Row] = {}
     for name, item in _items(queue):
@@ -120,12 +157,18 @@ def rows(queue: Path, cache: Path, open_asks: list[dict], live: set[str], now: f
         old = out.get(pane)
         if old is None or (row.score or -1) > (old.score or -1):
             out[pane] = row
+    for pane in sorted(dialogs & live - out.keys()):
+        left, working, _ = cache_left(pane, cache, now)
+        out[pane] = Row(pane, None, cache_text(left, working), None, None if working else left, dialog=True)
     return out
 
 
 def tokens(row: Row) -> dict[str, str]:
-    sort = 0 if row.score is None else max(1, min(999_999, round(row.score * 10)))
+    sort = 0 if row.score is None else max(1, min(TOP_SORT - 1, round(row.score * 10)))
     tie = NO_TIE if row.left is None or row.left <= 0 else min(NO_TIE - 1, int(row.left))
+    if row.dialog:
+        return {"hx_item": "⚑ dialog", "hx_cache": row.cache, "hx_score": "open",
+                "hx_sort": f"{TOP_SORT:06d}", "hx_tie": f"{tie:05d}"}
     return {"hx_item": row.ask or "⚑", "hx_cache": row.cache,
             "hx_score": "–" if row.score is None else f"▲ {row.score:.1f}",
             "hx_sort": f"{sort:06d}", "hx_tie": f"{tie:05d}"}

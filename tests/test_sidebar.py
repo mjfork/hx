@@ -162,6 +162,74 @@ def test_no_queue_folder_means_no_rows(dirs):
     assert sidebar.rows(queue, cache, [], {"w1:p1"}, NOW) == {}
 
 
+# --- a pane held on a dialog -------------------------------------------------------------------
+
+def blocked_pane(pid: str) -> Pane:
+    return Pane(pid, pid.split(":")[0], "s-" + pid, "blocked", "/w")
+
+
+def mode_file(folder: Path, pane_id: str, mode: str, driver: str) -> None:
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / f"{pane_id}.json").write_text(json.dumps({"mode": mode, "driver": driver}))
+
+
+def test_a_blocked_pane_with_no_item_gets_a_dialog_row_above_every_ask(dirs, tmp_path):
+    queue, cache = dirs
+    cache_file(cache, "w1:p2", 300)
+    queue_item(queue, "w1_p1.json", "w1:p1", "tr-aaaaa")
+    panes = [pane("w1:p1"), blocked_pane("w1:p2")]
+    out = sidebar.rows(queue, cache, [waiting("tr-aaaaa", 1e9)], {"w1:p1", "w1:p2"}, NOW,
+                       sidebar.blocked(panes, tmp_path / "mode"))
+    assert out["w1:p2"] == sidebar.Row("w1:p2", None, "5m!", None, 300, dialog=True)
+    toks = {p: sidebar.tokens(r) for p, r in out.items()}
+    assert toks["w1:p2"]["hx_item"] == "⚑ dialog" and toks["w1:p2"]["hx_score"] == "open"
+    assert toks["w1:p2"]["hx_sort"] > toks["w1:p1"]["hx_sort"]
+
+
+def test_the_dialog_row_goes_when_the_pane_is_no_longer_blocked(dirs, tmp_path):
+    queue, cache = dirs
+    assert sidebar.rows(queue, cache, [], {"w1:p2"}, NOW, sidebar.blocked([pane("w1:p2")], tmp_path)) == {}
+
+
+def test_a_blocked_pane_with_an_item_shows_one_row(dirs, tmp_path):
+    queue, cache = dirs
+    queue_item(queue, "w1_p2.json", "w1:p2", "tr-aaaaa")
+    out = sidebar.rows(queue, cache, [], {"w1:p2"}, NOW, sidebar.blocked([blocked_pane("w1:p2")], tmp_path))
+    assert list(out) == ["w1:p2"] and not out["w1:p2"].dialog and out["w1:p2"].ask is None
+
+
+def test_a_blocked_pane_a_live_driver_runs_is_left_to_the_driver(tmp_path):
+    mode = tmp_path / "mode"
+    mode_file(mode, "w1:p2", "agentic", "w1:p1")
+    mode_file(mode, "w1:p3", "agentic", "w9:p1")           # its driver is gone
+    mode_file(mode, "w1:p4", "async", "w1:p1")             # not agentic: the person drives it
+    mode_file(mode, "w1:p5", "agentic", "w1:p5")           # drives itself
+    panes = [pane("w1:p1")] + [blocked_pane(f"w1:p{n}") for n in (2, 3, 4, 5)]
+    assert sidebar.blocked(panes, mode) == {"w1:p3", "w1:p4", "w1:p5"}
+
+
+@pytest.mark.parametrize("content", ["", "nope", "[]", '{"mode": "agentic", "driver": 3}'])
+def test_a_bad_mode_file_means_no_driver(tmp_path, content):
+    (tmp_path / "w1:p2.json").write_text(content)
+    assert sidebar.blocked([pane("w1:p1"), blocked_pane("w1:p2")], tmp_path) == {"w1:p2"}
+
+
+def test_a_closed_blocked_pane_has_no_row(dirs):
+    queue, cache = dirs
+    assert sidebar.rows(queue, cache, [], {"w1:p1"}, NOW, {"w9:p9"}) == {}
+
+
+def test_refresh_shows_a_dialog_row(dirs, tmp_path, monkeypatch):
+    from hx import reconcile
+    queue, cache = dirs
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
+    h = FakeHerdr([pane("w1:p1"), blocked_pane("w1:p2")])
+    assert reconcile.refresh_sidebar(Waiting([]), h, tmp_path / "state.json", queue, NOW) == []
+    reported = [c for c in h.sidebar if c[0] == "report_tokens"]
+    assert [c[1] for c in reported] == ["w1:p2"] and reported[0][2]["hx_item"] == "⚑ dialog"
+    assert json.loads((tmp_path / "sidebar.json").read_text())["count"] == 1
+
+
 # --- tokens and sort ----------------------------------------------------------------------------
 
 def test_tokens_of_a_scored_row():
@@ -176,7 +244,7 @@ def test_tokens_of_an_unscored_row_sort_last_and_cold_after_warm():
 
 
 def test_sort_token_is_capped_and_never_ties_a_scored_row_with_an_unscored_one():
-    assert sidebar.tokens(sidebar.Row("p", "a", "1m!", 1e9, 60))["hx_sort"] == "999999"
+    assert sidebar.tokens(sidebar.Row("p", "a", "1m!", 1e9, 60))["hx_sort"] == "999998"
     assert sidebar.tokens(sidebar.Row("p", "a", "1m!", 0.01, 60))["hx_sort"] == "000001"
 
 

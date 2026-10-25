@@ -133,6 +133,28 @@ def test_a_card_names_the_open_trk_ask_it_relays(tmp_path):
     assert asks.cards(h, q, tmp_path / "cache", [], NOW)[0]["trk_ask"] is None    # closed in trk
 
 
+def test_a_pane_held_on_a_dialog_gets_a_blocked_card_first(tmp_path, monkeypatch):
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
+    q = tmp_path / "q"
+    item(q, "w1:p1", TWO_ASKS)
+    item(q, "w1:p3", TWO_ASKS)
+    ps = panes(("w1:p1", "s-a")) + [Pane("w1:p2", "w1", "s-b", "blocked", "/w"),
+                                    Pane("w1:p3", "w1", "s-c", "blocked", "/w")]   # has a card already
+    cards = asks.cards(FakeHerdr(ps, workspaces=[Workspace("w1", "zod fix")]), q, tmp_path / "cache", [], NOW)
+    assert [(c["pane"], c["kind"]) for c in cards] == [("w1:p2", "blocked"), ("w1:p1", "ask"), ("w1:p3", "ask")]
+    c = cards[0]
+    assert (c["space"], c["session"], c["sha"], c["asks"], c["item"]) == ("zod fix", "s-b", None, None, None)
+    assert c["raw"] == asks.DIALOG and c["cache"] == {"left_s": None, "text": "?"}
+
+
+def test_hx_answer_refuses_a_dialog(tmp_path, monkeypatch):
+    q = tmp_path / "q"
+    q.mkdir()
+    h = FakeHerdr([Pane("w1:p2", "w1", "s-b", "blocked", "/w")])
+    assert asks.answer(h, q, "w1:p2", "", "s-b", "1", 0) == "refused: the ask is gone (answered, resolved or dismissed)"
+    assert h.calls == []
+
+
 def test_an_unparsed_item_keeps_its_raw_text(tmp_path):
     q = tmp_path / "q"
     item(q, "w1:p1", "please look at the PR")

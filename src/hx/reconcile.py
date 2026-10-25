@@ -266,7 +266,8 @@ def _sidebar(herdr, state, state_path, queue_dir, open_asks, panes, now) -> list
     """Draw the needs-you panel; display only, so it never raises. Returns the errors."""
     try:
         live = {p.pane_id for p in panes}
-        rows = sidebar.rows(queue_dir, sidebar.cache_dir(), open_asks, live, now)
+        rows = sidebar.rows(queue_dir, sidebar.cache_dir(), open_asks, live, now,
+                            sidebar.blocked(panes, sidebar.mode_dir()))
         sidebar.write_line(state_path.with_name("sidebar.json"), rows, now)
         state.sidebar, errors = sidebar.publish(herdr, rows, state.sidebar, live)
         return errors

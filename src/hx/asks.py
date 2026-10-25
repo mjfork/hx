@@ -1,6 +1,8 @@
 """The needs-you queue as cards, for a page that answers asks with a tap: `hx needs-you --json`
 and `hx answer`. A card is one live pane's item (herdr-jump's queue) with its "## ⚑ Needs you"
 section parsed into asks; hx's own hx_<ask>.json items are left out, because trk shows those asks.
+A pane held on a dialog with no item gets a card of kind "blocked" (sidebar.blocked): no asks and
+no sha, so nothing answers it from the page; a dialog takes keys in the pane.
 
 The parser is strict: a section off the async turn format (Ask / Options / Reply with / Unblocks)
 gives no asks, and the page shows the raw text. Two forms agents write often are on it: a label on an
@@ -28,6 +30,7 @@ from hx.send import send
 from hx.state import state_dir
 
 ANSWERED_KEEP_S = 86400      # how long hx remembers that it answered an ask
+DIALOG = "A question or permission dialog is open in this pane. Answer it there."
 
 FIELD = re.compile(r"^\*\*(Ask|Options|Reply with|Unblocks)(?: (\d+))?(?: \(([^()]{1,60})\))?:\*\*\s*(.*)$")
 OPTION = re.compile(r"^(\d+)\.\s+(.*)$")
@@ -141,7 +144,7 @@ def _read(f: Path) -> dict | None:
 
 
 def cards(herdr, queue: Path, cache: Path, open_asks: list[dict], now: float) -> list[dict]:
-    """One card per live pane's item, oldest first."""
+    """One card per live pane's item, oldest first, after a card for each pane held on a dialog."""
     live = {p.pane_id: p for p in herdr.panes()}
     try:
         spaces = {w.workspace_id: w.label for w in herdr.workspaces()}
@@ -160,11 +163,21 @@ def cards(herdr, queue: Path, cache: Path, open_asks: list[dict], now: float) ->
         left, working, _ = sidebar.cache_left(pane.pane_id, cache, now)
         out.append({"pane": pane.pane_id, "workspace": pane.workspace_id,
                     "space": spaces.get(pane.workspace_id, ""), "session": pane.session,
-                    "ts": ts, "item": name, "sha": sha(text),
+                    "kind": "ask", "ts": ts, "item": name, "sha": sha(text),
                     "cache": {"left_s": None if left is None else round(left),
                               "text": sidebar.cache_text(left, working)},
                     "trk_ask": sidebar.match(name, it, ids), "asks": parse(text), "raw": text})
-    return sorted(out, key=lambda c: (c["ts"] or 0, c["pane"]))
+    dialogs = []                                             # a pane with a card above shows that card
+    for pid in sorted(sidebar.blocked(live.values(), sidebar.mode_dir()) - {c["pane"] for c in out}):
+        pane = live[pid]
+        left, working, _ = sidebar.cache_left(pid, cache, now)
+        dialogs.append({"pane": pid, "workspace": pane.workspace_id,
+                        "space": spaces.get(pane.workspace_id, ""), "session": pane.session,
+                        "kind": "blocked", "ts": None, "item": None, "sha": None,
+                        "cache": {"left_s": None if left is None else round(left),
+                                  "text": sidebar.cache_text(left, working)},
+                        "trk_ask": None, "asks": None, "raw": DIALOG})
+    return dialogs + sorted(out, key=lambda c: (c["ts"] or 0, c["pane"]))
 
 
 def _changed(queue: Path, pane: str, digest: str) -> str | None:
