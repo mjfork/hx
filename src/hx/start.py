@@ -26,6 +26,9 @@ class StartError(Exception):
     pass
 
 
+OVERRIDES = ("HERDR_HOLD_OVERRIDE", "DISPATCH_FORCE")   # launch-guard.sh's overrides
+
+
 def run_guard(label: str, check_only: bool) -> str | None:
     """launch-guard.sh on PATH (scripts/launch-guard.sh; install.sh --launch-guard): None when the
     box can take a session, else why not.
@@ -125,6 +128,9 @@ def start(trk: Trk, herdr, state_path: Path, cfg: Config, root: str, now: float 
     title = it["title"] if len(it["title"]) <= 40 else it["title"][:39] + "…"
     label = f"{root} {title}"
     env = {"HX_ROLE": role, "HX_ROOT": root}
+    # An override that let this launch past the guard must reach the pane too, or claude-worker's own
+    # guard refuses there and leaves an empty Space. claude-worker unsets them for the session.
+    env.update({k: os.environ[k] for k in OVERRIDES if os.environ.get(k)})
     with locked(state_path):
         state = copy.deepcopy(load(state_path))
         b = state.bindings.get(root)

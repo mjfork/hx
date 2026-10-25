@@ -139,6 +139,14 @@ def test_worker_refuses_while_the_guard_holds_and_runs_without_a_guard(worker):
     assert worker("x")[0].returncode == 0
 
 
+def test_worker_unsets_the_overrides_after_its_guard(worker):
+    (worker.bin / "launch-guard.sh").write_text('#!/bin/bash\nexit 0\n')
+    (worker.bin / "launch-guard.sh").chmod(0o755)
+    (worker.bin / "claude").write_text('#!/bin/bash\necho "${HERDR_HOLD_OVERRIDE-unset} ${DISPATCH_FORCE-unset}" > "$HOME/claude-args"\n')
+    out, seen = worker("x", HERDR_HOLD_OVERRIDE="1", DISPATCH_FORCE="1")
+    assert out.returncode == 0 and seen == ["unset unset"]
+
+
 def test_worker_help_starts_nothing(worker):
     out, argv = worker("--help")
     assert out.returncode == 0 and "250000" in out.stdout and argv is None

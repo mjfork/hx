@@ -10,6 +10,8 @@ if [[ "${1:-}" == "--help" ]]; then
 fi
 # Refuse while a machine-wide hold is on (hx hold; see launch-guard.sh). HERDR_HOLD_OVERRIDE=1 skips it.
 if command -v launch-guard.sh >/dev/null; then launch-guard.sh --hold-only claude-worker || exit $?; fi
+# The override was for this launch alone: the session's own launches go through the guard again.
+unset HERDR_HOLD_OVERRIDE DISPATCH_FORCE
 export CLAUDE_CODE_AUTO_COMPACT_WINDOW="${CLAUDE_CODE_AUTO_COMPACT_WINDOW:-250000}"
 # An env set in settings.json (a coordinator's larger cap, say) overrides the process env, but
 # --settings outranks the settings files, so pass the worker window as a flag too.

@@ -5,6 +5,11 @@ claude-worker, trk's drivers, your own scripts): {"id", "reason", "by", "since",
 2027-01-15T08:00:00Z and until null for "until resumed". It is held when it exists and until is
 null or later than now. A file that cannot be read counts as held: a reader never guesses free.
 
+A script that holds and resumes on its own (a swap watcher) uses the checked forms, each a check and
+a write under one lock, so it never overwrites or ends a hold someone else set between its read and
+its write: put(if_free=True), put(replace=<id>) and resume(only=<id>). Each raises Mismatch when the
+file is not what it expects. Never hold hold.json.lock around separate hx calls: hx takes it itself.
+
 The watcher tells each live Claude pane once when a hold starts and once when it ends (wakes()).
 Sessions that start during a hold hear it from claude/hooks/hold-notice.sh instead.
 """
@@ -30,6 +35,17 @@ TIME = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{
 MAX_BYTES = 65536        # a bigger file is unreadable, to hx and the hook alike
 RESUME_KEEP_S = 3600     # a session away when the hold ends hears RESUME if back within this
 SECONDS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+
+
+class Mismatch(Exception):
+    """A checked write found another hold, or an unreadable file, and changed nothing."""
+
+    def __init__(self, status: "Status", wanted: str):
+        self.status = status
+        held = status.record or {}
+        now = (f"hold {held.get('id')} by {held.get('by')}" if status.kind == "held" else
+               f"an unreadable hold file ({status.error})" if status.kind == "unreadable" else "no hold")
+        super().__init__(f"{wanted}, but there is {now}")
 
 
 @dataclass(frozen=True)
@@ -123,21 +139,32 @@ def _locked(path: Path):
             fcntl.flock(f, fcntl.LOCK_UN)
 
 
-def put(path: Path, reason: str, by: str, until: float | None, now: float) -> dict:
+def put(path: Path, reason: str, by: str, until: float | None, now: float, *,
+        if_free: bool = False, replace: str | None = None) -> dict:
+    """Write a new hold. if_free: only when no hold is live (an expired one is free; an unreadable
+    file is not). replace: only when the file holds that id, live or expired. Either raises Mismatch."""
     rec = {"id": secrets.token_hex(4), "reason": " ".join(reason.split()), "by": by,
            "since": iso(now), "until": iso(math.ceil(until)) if until is not None else None}   # never earlier
     with _locked(path):
+        if if_free or replace is not None:
+            st = read(path, now)
+            if if_free and st.kind != "free":
+                raise Mismatch(st, "--if-free wants no live hold")
+            if replace is not None and (st.kind == "unreadable" or (st.record or {}).get("id") != replace):
+                raise Mismatch(st, f"--replace wants hold {replace}")
         tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
         tmp.write_text(json.dumps(rec, indent=1) + "\n")
         os.replace(tmp, path)                  # a reader sees the old file or the new, never half
     return rec
 
 
-def _remove(path: Path, now: float, only_expired: bool) -> dict | None:
+def _remove(path: Path, now: float, only_expired: bool, only: str | None = None) -> dict | None:
     with _locked(path):
         st = read(path, now)
         if st.kind == "free" and st.record is None:
             return None
+        if only is not None and (st.kind == "unreadable" or (st.record or {}).get("id") != only):
+            raise Mismatch(st, f"--id wants hold {only}")
         if only_expired and not (st.kind == "free" and st.record is not None):
             return None
         if path.is_dir() and not path.is_symlink():
@@ -147,9 +174,10 @@ def _remove(path: Path, now: float, only_expired: bool) -> dict | None:
         return st.record if st.record is not None else {}
 
 
-def resume(path: Path, now: float | None = None) -> dict | None:
-    """Remove the hold: its record, {} for a file that could not be read, None when there was none."""
-    return _remove(path, time.time() if now is None else now, only_expired=False)
+def resume(path: Path, now: float | None = None, only: str | None = None) -> dict | None:
+    """Remove the hold: its record, {} for a file that could not be read, None when there was none.
+    only: remove it only when it is that hold (live or expired), else raise Mismatch."""
+    return _remove(path, time.time() if now is None else now, only_expired=False, only=only)
 
 
 def expire(path: Path, now: float) -> dict | None:

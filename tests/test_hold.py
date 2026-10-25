@@ -429,3 +429,66 @@ def test_hx_resume_reports_what_it_cannot_remove(capsys):
     (state_file() / "x").write_text("")
     assert main(["resume"]) == 2
     assert "cannot remove" in capsys.readouterr().err
+
+
+# --- the checked forms: a script's hold never overwrites or ends someone else's ---
+
+def test_if_free_holds_only_when_no_hold_is_live(tmp_path):
+    p = tmp_path / "hold.json"
+    mine = hold.put(p, "swap", "swap-guard", NOW + 7200, NOW, if_free=True)
+    with pytest.raises(hold.Mismatch, match=f"hold {mine['id']} by swap-guard"):
+        hold.put(p, "swap", "swap-guard", NOW + 7200, NOW, if_free=True)
+    assert hold.read(p, NOW).record == mine
+    write(p, until="2027-01-15T07:59:59Z")                       # expired: free
+    assert hold.put(p, "swap", "swap-guard", None, NOW, if_free=True)["by"] == "swap-guard"
+    p.write_text("{oops")                                        # unreadable counts as held
+    with pytest.raises(hold.Mismatch, match="unreadable"):
+        hold.put(p, "swap", "swap-guard", None, NOW, if_free=True)
+    assert p.read_text() == "{oops"
+
+
+def test_replace_renews_only_the_hold_it_names(tmp_path):
+    p = tmp_path / "hold.json"
+    mine = hold.put(p, "swap", "swap-guard", NOW + 600, NOW)
+    renewed = hold.put(p, "swap", "swap-guard", NOW + 7200, NOW, replace=mine["id"])
+    assert renewed["id"] != mine["id"] and hold.read(p, NOW).record == renewed
+    theirs = write(p, by="michael")                              # a person held in between
+    with pytest.raises(hold.Mismatch, match="hold ab12cd34 by michael"):
+        hold.put(p, "swap", "swap-guard", NOW + 7200, NOW, replace=renewed["id"])
+    assert hold.read(p, NOW).record == theirs
+    p.unlink()
+    with pytest.raises(hold.Mismatch, match="no hold"):
+        hold.put(p, "swap", "swap-guard", NOW + 7200, NOW, replace=renewed["id"])
+    assert not p.exists()
+
+
+def test_resume_by_id_ends_only_that_hold(tmp_path):
+    p = tmp_path / "hold.json"
+    theirs = write(p, by="michael")
+    with pytest.raises(hold.Mismatch, match="by michael"):
+        hold.resume(p, NOW, only="ffff0000")
+    assert hold.read(p, NOW).record == theirs
+    assert hold.resume(p, NOW, only="ab12cd34") == theirs and not p.exists()
+    assert hold.resume(p, NOW, only="ab12cd34") is None          # nothing left: nothing to end
+    p.write_text("{oops")
+    with pytest.raises(hold.Mismatch):
+        hold.resume(p, NOW, only="ab12cd34")
+    assert p.exists()
+
+
+def test_the_checked_forms_exit_4_and_change_nothing(capsys):
+    assert main(["hold", "--reason", "swap", "--by", "swap-guard", "--if-free"]) == 0
+    mine = json.loads(state_file().read_text())["id"]
+    assert main(["hold", "--reason", "swap", "--if-free"]) == 4
+    assert "not held" in capsys.readouterr().err
+    assert main(["hold", "--reason", "swap", "--replace", "ffff0000"]) == 4
+    assert main(["resume", "--id", "ffff0000"]) == 4
+    assert "not resumed" in capsys.readouterr().err and json.loads(state_file().read_text())["id"] == mine
+    assert main(["hold", "--reason", "swap", "--replace", mine, "--until", "2h"]) == 0
+    new = json.loads(state_file().read_text())["id"]
+    assert main(["resume", "--id", new]) == 0 and not state_file().exists()
+
+
+def test_if_free_and_replace_cannot_be_combined():
+    with pytest.raises(SystemExit):
+        main(["hold", "--reason", "x", "--if-free", "--replace", "ab12cd34"])

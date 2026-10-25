@@ -71,6 +71,16 @@ def test_space_env_carries_role_and_root(trk_home, sh, tmp_path, repo):
     assert h.calls[0][3] == {"HX_ROLE": "solo", "HX_ROOT": r}
 
 
+def test_a_guard_override_reaches_the_pane(trk_home, sh, tmp_path, repo, monkeypatch):
+    """The override that let hx start past the guard must reach claude-worker's guard in the pane."""
+    r = solo_root(sh, repo)
+    monkeypatch.setenv("HERDR_HOLD_OVERRIDE", "1")
+    monkeypatch.setenv("DISPATCH_FORCE", "1")
+    h = FakeHerdr([])
+    go(trk_home, tmp_path, h, r)
+    assert h.calls[0][3] == {"HX_ROLE": "solo", "HX_ROOT": r, "HERDR_HOLD_OVERRIDE": "1", "DISPATCH_FORCE": "1"}
+
+
 def test_worktree_is_the_jira_key(trk_home, sh, tmp_path, repo):
     r = solo_root(sh, repo, "--jira", "https://x.atlassian.net/browse/PROJ-42")
     h, rec = FakeHerdr([]), Recorder()

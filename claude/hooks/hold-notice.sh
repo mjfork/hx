@@ -35,7 +35,8 @@ until = r["until"]
 if until is not None:
     if not isinstance(until, str) or not TIME.match(until):
         sys.exit(1)
-    if datetime.fromisoformat(until).timestamp() <= datetime.now(timezone.utc).timestamp():
+    # a trailing Z as +00:00: python3 before 3.11 (macOS ships 3.9) cannot parse Z
+    if datetime.fromisoformat(re.sub(r"Z$", "+00:00", until)).timestamp() <= datetime.now(timezone.utc).timestamp():
         print("FREE")
         sys.exit(0)
 print(f"HOLD (hx {r['id']}): a machine-wide hold by {r['by']} since {r['since']}, "

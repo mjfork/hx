@@ -133,13 +133,21 @@ def _hold(args, path: Path, now: float) -> int:
         except ValueError as e:
             print(f"hx hold: --until {e}", file=sys.stderr)
             return 2
-        rec = hold.put(path, args.reason, args.by or getpass.getuser(), until, now)
+        try:
+            rec = hold.put(path, args.reason, args.by or getpass.getuser(), until, now,
+                           if_free=args.if_free, replace=args.replace)
+        except hold.Mismatch as e:
+            print(f"hx hold: not held: {e}", file=sys.stderr)
+            return 4
         print(f"held: {rec['id']} until {rec['until'] or 'hx resume'}. Live agents hear it on the "
               f"watcher's next pass; launchers refuse new sessions now. ({path})")
         return 0
     if args.cmd == "resume":
         try:
-            rec = hold.resume(path, now)
+            rec = hold.resume(path, now, only=args.id)
+        except hold.Mismatch as e:
+            print(f"hx resume: not resumed: {e}", file=sys.stderr)
+            return 4
         except OSError as e:
             print(f"hx resume: cannot remove {path}: {e}", file=sys.stderr)
             return 2
@@ -198,7 +206,12 @@ def main(argv: list[str] | None = None) -> int:
     h.add_argument("--reason", required=True)
     h.add_argument("--until", help="2h, 30m, 1d or an ISO time; default: until hx resume")
     h.add_argument("--by", default=None, help="who holds (default: your user name)")
-    sub.add_parser("resume", help="end the hold")
+    only = h.add_mutually_exclusive_group()
+    only.add_argument("--if-free", action="store_true",
+                      help="hold only if no hold is live (an expired one counts as free); else exit 4")
+    only.add_argument("--replace", metavar="ID", help="hold only if the file holds this id; else exit 4")
+    r = sub.add_parser("resume", help="end the hold")
+    r.add_argument("--id", help="end it only if it is this hold; else exit 4")
     hd = sub.add_parser("held", help="exit 0 if held, 1 if not, 2 if hold.json cannot be read")
     hd.add_argument("--json", action="store_true")
     sd = sub.add_parser("send", help="type a line into panes, never over a person's draft")

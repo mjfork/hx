@@ -269,8 +269,8 @@ With no config file, asks go to your user name on the console channel only.
 | `hx watch` | the watcher loop; the systemd service runs it. `--interval` (1 s) and `--tick` (30 s) set how often it checks the feed and how often it runs a pass anyway |
 | `hx reconcile [--dry-run]` | one pass now. With `--dry-run`, print the actions and take none |
 | `hx start <tr-id> [--dry-run] [--model M] [--effort E] [--reason TEXT]` | open a Space for a self-contained work item and start its solo session. `--effort` is one of low, medium (default), high, xhigh, max |
-| `hx hold --reason TEXT [--until 2h\|ISO-time] [--by WHO]` | hold the whole machine: launchers (`hx start` among them) refuse to start sessions, and each live agent is told once |
-| `hx resume` | end the hold; the agents that heard it are told once |
+| `hx hold --reason TEXT [--until 2h\|ISO-time] [--by WHO] [--if-free \| --replace ID]` | hold the whole machine: launchers (`hx start` among them) refuse to start sessions, and each live agent is told once. For a script that holds on its own: `--if-free` holds only when no hold is live (an expired one counts as free, an unreadable file does not), `--replace ID` only when the file holds that id; either exits 4 and changes nothing otherwise. Each check and write is one step under hx's lock: never hold `hold.json.lock` yourself around separate hx calls |
+| `hx resume [--id ID]` | end the hold; the agents that heard it are told once. `--id` ends it only if it is that hold (exit 4 otherwise), so a script ends only its own |
 | `hx send --pane P [--pane P2 ...] [--wait 45] TEXT` | type one line into panes by the watcher's rule: each pane gets it once its input box has been empty for 30 s; a draft, a box hx cannot see, or no quiet window within `--wait` is refused. Exit 1 if any pane was refused |
 | `hx held [--json]` | exit 0 if held, 1 if not, 2 if the hold file cannot be read (which counts as held) |
 | `hx sidebar setup [--dry-run] [--config PATH]` | point herdr's config.toml at the needs-you sidebar (below): the Agents rows, `sidebar_width = 34` and the tab bar. It backs the file up first and changes only those three keys; `--dry-run` prints the change. `install.sh` runs it, so this is for a rerun or a second config |
@@ -386,7 +386,7 @@ installer added it. It never touches the config or the state directory; delete
 |---|---|
 | Asks do not show up | `systemctl --user status hx`, then `watch.log`. Check that the `[humans.*]` name is the trk actor the ask is addressed to (`trk waiting --all --json`) |
 | `ALERT hx watcher stopped acting` in the inbox | trk's replies no longer match the contract hx checks. Upgrade hx, or run `scripts/sync-contract.sh`, then restart the service |
-| `hx start` says `held: …` | launch-guard.sh refused the launch; its message says why |
+| `hx start` says `held: …` | launch-guard.sh refused the launch; its message says why. To launch anyway, run it with `HERDR_HOLD_OVERRIDE=1` (a hold) or `DISPATCH_FORCE=1` (load, memory, swap, disk): hx passes the override to the new pane, so claude-worker's own guard lets it through too, and claude-worker clears it for the session |
 | `hx start` says the item names no repo checkout | `trk edit <id> --add-repo <path>`: the path must be a git checkout |
 | A session is not woken after an answer | the pane is busy (the note waits for idle), someone has text in its input box (the note waits until the box has been empty for 30 seconds), or the session left herdr. `hx reconcile --dry-run` shows the wakes still owed |
 | `hx: command not found` | `uv tool update-shell`, then a new shell |
