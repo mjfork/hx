@@ -37,7 +37,7 @@ Options:
   --no-service    do not install or start the watcher service (systemd; launchd on macOS)
   --no-sidebar    leave herdr's config.toml alone: no needs-you list in the Agents panel
   --force         reinstall the hx command even if uv already has it, and replace a skill that
-                  differs from the repo copy (the old one is kept as <name>.bak-<time>)
+                  differs from the repo copy (the old one is kept as ~/.local/share/hx-skill-backups/)
   --me NAME       the trk actor who hears asks, for a new config (default: your user name)
   --launch-guard  put launch-guard.sh on PATH (~/.local/bin): hx start then waits while the box is
                   held, loaded, short of memory, swap or disk, or launched a session under 30s ago
@@ -90,6 +90,8 @@ done
 
 CONFIG_HOME=${XDG_CONFIG_HOME:-$HOME/.config}
 CLAUDE_DIR=$HOME/.claude
+# Replaced skills are kept outside every folder Claude Code loads skills from, so a backup never loads as a skill.
+SKILL_BACKUPS=${XDG_DATA_HOME:-$HOME/.local/share}/hx-skill-backups
 SETTINGS=$CLAUDE_DIR/settings.json
 BIN_DIR=$HOME/.local/bin
 UNIT_DIR=$CONFIG_HOME/systemd/user
@@ -124,7 +126,7 @@ check_skills() { # refuse to replace a skill that differs from the repo copy, un
   ((${#differing[@]})) || return 0
   say "== skills that differ from the repo copy: ${differing[*]}"
   if ((FORCE)); then
-    say "--force given: they will be replaced; the old copies are kept as <name>.bak-<time>"
+    say "--force given: they will be replaced; the old copies are kept in $SKILL_BACKUPS"
   elif ((DRY)); then
     say "[dry-run] a real run would refuse here; add --force to replace them"
   else
@@ -157,8 +159,9 @@ install_skills() {
       absent) say "skill $s: installing"; put_skill "$s" ;;
       dangling) say "skill $s: replacing a link to a folder that no longer exists"
         act rm "$CLAUDE_DIR/skills/$s"; put_skill "$s" ;;
-      differs) say "skill $s: replacing; keeping the old one as $s.bak-$stamp"
-        act mv "$CLAUDE_DIR/skills/$s" "$CLAUDE_DIR/skills/$s.bak-$stamp"
+      differs) say "skill $s: replacing; keeping the old one as $SKILL_BACKUPS/$s.$stamp"
+        act mkdir -p "$SKILL_BACKUPS"
+        act mv "$CLAUDE_DIR/skills/$s" "$SKILL_BACKUPS/$s.$stamp"
         put_skill "$s" ;;
     esac
   done

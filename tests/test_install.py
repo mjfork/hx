@@ -122,7 +122,8 @@ def test_refuses_a_differing_skill_without_force(box):
     out = box(ok=False)
     assert out.returncode != 0 and "differ" in out.stderr and "uv tool install" not in box.calls()
     box("--force")
-    assert skill.is_symlink() and list(skill.parent.glob("hx-work.bak-*"))
+    assert skill.is_symlink() and list((box.home / ".local/share/hx-skill-backups").glob("hx-work.*"))
+    assert not list(skill.parent.glob("*bak*"))  # no backup loads as a skill
 
 
 def test_missing_trk_stops_the_install(box):

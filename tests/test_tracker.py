@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -30,6 +31,38 @@ def test_reply_that_breaks_the_contract_raises(trk_home, tmp_path):
     fake.chmod(0o755)
     with pytest.raises(TrkError, match="contract"):
         Trk(home=str(trk_home), bin=str(fake)).claims()
+
+
+def _fake_waiting(trk_home, sh, tree, tmp_path, break_it):
+    """A trk whose `waiting` reply is the real one for two asks, the first edited by `break_it`."""
+    for q in ("Colour?", "Size?"):
+        sh("ask", tree["ticket"], q, "--to", "product", "--question", "-",
+           "--as", "worker", "--session", "s-worker", stdin=q)
+    reply = Trk(home=str(trk_home)).waiting()
+    reply.pop("invalid", None)
+    break_it(reply)
+    (tmp_path / "reply.json").write_text(json.dumps(reply))
+    fake = tmp_path / "fake-trk"
+    fake.write_text(f'#!/bin/sh\ncat {tmp_path / "reply.json"}\n')
+    fake.chmod(0o755)
+    return Trk(home=str(trk_home), bin=str(fake)), [a["id"] for a in reply["asks"]]
+
+
+def test_an_ask_that_breaks_the_contract_is_left_out_and_named(trk_home, sh, tree, tmp_path):
+    def short_sha(reply):
+        reply["asks"][0]["red_read"] = {"sha": "3b1da7854"}   # the shape UP-0019 saw
+    trk, ids = _fake_waiting(trk_home, sh, tree, tmp_path, short_sha)
+    reply = trk.waiting()
+    assert [a["id"] for a in reply["asks"]] == ids[1:]
+    assert [b["id"] for b in reply["invalid"]] == ids[:1] and reply["invalid"][0]["error"]
+
+
+def test_a_break_outside_the_asks_still_raises(trk_home, sh, tree, tmp_path):
+    def bad_schema(reply):
+        reply["schema"] = 2
+    trk, _ = _fake_waiting(trk_home, sh, tree, tmp_path, bad_schema)
+    with pytest.raises(TrkError, match="contract"):
+        trk.waiting()
 
 
 def test_default_contract_ships_with_hx(monkeypatch):

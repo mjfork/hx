@@ -102,7 +102,8 @@ The installer:
 2. Installs the `hx` command with `uv tool install --editable`, so a `git pull` in the checkout
    upgrades hx.
 3. Links the `hx-work` skill into `~/.claude/skills/`. It refuses to replace a different skill of
-   that name unless you pass `--force`; the old one is then kept as `hx-work.bak-<time>`.
+   that name unless you pass `--force`; the old one is then kept as
+   `~/.local/share/hx-skill-backups/hx-work.<time>`, outside the skills folder so it never loads as a skill.
 4. Writes `~/.config/hx/config.toml` if there is none. Asks go to your user name; use
    `--me NAME` to pick another trk actor (trk actor names are lowercase letters, digits and `-`). If trk is an editable install, the config points hx at
    that checkout's contract.

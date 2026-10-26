@@ -483,18 +483,58 @@ def test_refresh_shows_a_new_item_and_keeps_the_rest_of_the_state(dirs, tmp_path
     assert after.sidebar == ["w1:p1"] and after.done == {"kept": 1.0}
 
 
-def test_refresh_reports_a_failure_and_changes_nothing(dirs, tmp_path):
+def test_refresh_with_trk_down_still_shows_the_queue_rows(dirs, tmp_path, monkeypatch):
+    """UP-0020: a trk failure no longer blanks the panel; the queue files still make rows, and the
+    tab line says trk is down instead of `hx stale`."""
     from hx import reconcile, state as st
 
     class Broken(Waiting):
         def waiting(self):
             raise RuntimeError("trk down")
+    queue, cache = dirs
+    monkeypatch.setenv("CACHE_STATE_DIR", str(cache))
+    queue_item(queue, "w1_p1.json", "w1:p1", "tr-aaaaa")
+    path = tmp_path / "state.json"
+    st.save(st.State(), path)
+    h = FakeHerdr([pane("w1:p1")])
+    errors = reconcile.refresh_sidebar(Broken([]), h, path, queue, NOW)
+    assert errors and "trk down" in errors[0]
+    assert [c[1] for c in h.sidebar if c[0] == "report_tokens"] == ["w1:p1"]
+    assert st.load(path).sidebar == ["w1:p1"]
+    line_file = tmp_path / "sidebar.json"
+    assert "trk down" in json.loads(line_file.read_text())["trk_error"]
+    assert sidebar.line(line_file, NOW) == "⚑ 1 · trk down"
+
+
+def test_refresh_reports_a_left_out_ask_and_shows_the_rest(dirs, tmp_path, monkeypatch):
+    from hx import reconcile, state as st
+
+    class Partial(Waiting):
+        def waiting(self):
+            return {"asks": self.asks, "invalid": [{"id": "tr-ccccc", "error": "'3b1da7854' does not match"}]}
+    queue, cache = dirs
+    monkeypatch.setenv("CACHE_STATE_DIR", str(cache))
+    queue_item(queue, "w1_p1.json", "w1:p1", "tr-aaaaa")
+    path = tmp_path / "state.json"
+    st.save(st.State(), path)
+    h = FakeHerdr([pane("w1:p1")])
+    errors = reconcile.refresh_sidebar(Partial([waiting("tr-aaaaa", 2.0)]), h, path, queue, NOW)
+    assert len(errors) == 1 and "tr-ccccc" in errors[0]
+    assert sidebar.line(tmp_path / "sidebar.json", NOW).startswith("⚑ 1 · tr-aaaaa")
+
+
+def test_refresh_with_herdr_down_changes_nothing(dirs, tmp_path):
+    from hx import reconcile, state as st
+
+    class Down(FakeHerdr):
+        def panes(self):
+            raise RuntimeError("herdr down")
     queue, _ = dirs
     path = tmp_path / "state.json"
     s = st.State()
     s.sidebar = ["w1:p1"]
     st.save(s, path)
-    h = FakeHerdr([pane("w1:p1")])
-    errors = reconcile.refresh_sidebar(Broken([]), h, path, queue, NOW)
-    assert errors and "trk down" in errors[0]
+    h = Down([pane("w1:p1")])
+    errors = reconcile.refresh_sidebar(Waiting([]), h, path, queue, NOW)
+    assert errors and "herdr down" in errors[0]
     assert h.sidebar == [] and st.load(path).sidebar == ["w1:p1"]

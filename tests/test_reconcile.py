@@ -78,9 +78,22 @@ def test_dry_run_acts_on_nothing(trk_home, sh, tree, tmp_path):
 def test_trk_failure_moves_nothing(trk_home, sh, tree, tmp_path, monkeypatch):
     ask_michael(sh, tree)
     monkeypatch.setattr(Trk, "waiting", lambda self: (_ for _ in ()).throw(TrkError("boom")))
+    (tmp_path / "q").mkdir()
+    (tmp_path / "q" / "w1_p2.json").write_text(json.dumps({"pane": "w1:p2", "ts": 0, "text": "a question"}))
     with pytest.raises(TrkError):
         run(trk_home, tmp_path, FakeHerdr([WORKER]))
-    assert not (tmp_path / "state.json").exists() and not (tmp_path / "inbox.log").exists()
+    assert not (tmp_path / "inbox.log").exists()
+    from hx import state as st
+    saved = st.load(tmp_path / "state.json")       # UP-0020: only the panel moved, drawn from the queue
+    assert saved.sidebar == ["w1:p2"] and saved.seq == 0 and saved.asks == {}
+    assert "boom" in json.loads((tmp_path / "sidebar.json").read_text())["trk_error"]
+
+
+def test_trk_failure_in_a_dry_run_draws_nothing(trk_home, sh, tree, tmp_path, monkeypatch):
+    monkeypatch.setattr(Trk, "waiting", lambda self: (_ for _ in ()).throw(TrkError("boom")))
+    with pytest.raises(TrkError):
+        run(trk_home, tmp_path, FakeHerdr([WORKER]), dry=True)
+    assert not (tmp_path / "state.json").exists() and not (tmp_path / "sidebar.json").exists()
 
 
 class FailingWake(FakeHerdr):

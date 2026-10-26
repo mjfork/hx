@@ -201,24 +201,28 @@ def publish(herdr, shown: dict[str, Row], before: list[str], live: set[str]) -> 
 STALE_S = 120     # the watcher passes every 15 s or so; two minutes of silence means it stopped
 
 
-def write_line(path: Path, shown: dict[str, Row], now: float) -> None:
-    """What the tab bar shows, for `hx needs-you --line` (herdr runs it every 15 s)."""
+def write_line(path: Path, shown: dict[str, Row], now: float, trk_error: str | None = None) -> None:
+    """What the tab bar shows, for `hx needs-you --line` (herdr runs it every 15 s). `trk_error` says
+    trk's asks could not be read, so the rows come from the queue files alone."""
     scored = [r for r in shown.values() if r.score is not None]
     top = max(scored, key=lambda r: r.score, default=None)
     tmp = path.with_name(f".{path.name}.tmp")
     tmp.write_text(json.dumps({"at": now, "count": len(shown),
-                               "top": f"{top.ask} {top.score:.0f}" if top else None}))
+                               "top": f"{top.ask} {top.score:.0f}" if top else None,
+                               "trk_error": trk_error}))
     os.replace(tmp, path)
 
 
 def line(path: Path, now: float) -> str:
     try:
         d = json.loads(path.read_text())
-        at, count, top = float(d["at"]), int(d["count"]), d.get("top")
+        at, count, top, down = float(d["at"]), int(d["count"]), d.get("top"), d.get("trk_error")
     except (OSError, ValueError, TypeError, KeyError, AttributeError):
         return "hx stale"
     if not math.isfinite(at) or now - at > STALE_S:
         return "hx stale"
+    if down:
+        return f"⚑ {count} · trk down"
     if count == 0:
         return ""
     return f"⚑ {count}" + (f" · {top}" if top else "")

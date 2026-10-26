@@ -164,7 +164,8 @@ def _reconcile(trk, herdr, state_path, inbox, queue_dir, humans, dry_run, cfg, n
     fresh_after = _cutoff(now - REPLY_FRESH_S)
     result = _read_feed(trk, state, cache, fresh_after)
     show = lambda i: cache.get(trk, i, now)  # noqa: E731
-    open_asks = trk.waiting()["asks"]
+    log = _logger(state_path.with_name("watch.log"))
+    open_asks = _waiting(trk, herdr, state_path, queue_dir, now, log, dry_run)
     root_now = {a["id"]: a["root"] for a in open_asks}
     replied = [{**r, "root": root_now[r["item"]]}            # the ask may have moved since
                for r in state.replies + result.replied     # a later close ends its replies
@@ -173,7 +174,7 @@ def _reconcile(trk, herdr, state_path, inbox, queue_dir, humans, dry_run, cfg, n
     panes = herdr.panes()
     closed = state.pending + result.closed
     comments = [r for r in state.comments + result.comments if r["data"]["comment_id"] not in result.acked]
-    parent = _parent(show, log := _logger(state_path.with_name("watch.log")))
+    parent = _parent(show, log)
 
     def owed():
         state.pending = _owed(closed, state, panes)
@@ -262,13 +263,39 @@ def _reconcile(trk, herdr, state_path, inbox, queue_dir, humans, dry_run, cfg, n
     return actions + effects
 
 
-def _sidebar(herdr, state, state_path, queue_dir, open_asks, panes, now) -> list[str]:
-    """Draw the needs-you panel; display only, so it never raises. Returns the errors."""
+def _waiting(trk, herdr, state_path, queue_dir, now, log, dry_run=False) -> list[dict]:
+    """trk's open asks for a pass (its caller holds the state lock). An ask that breaks the contract
+    is logged and left out. When trk fails outright, the panel is still drawn from the queue files,
+    marked trk-down, before the error stops the pass: only the panel's field of the saved state
+    changes, so the pass's unsaved feed cursor is not kept."""
+    try:
+        reply = trk.waiting()
+    except Exception as e:
+        if dry_run:
+            raise
+        try:
+            panes = herdr.panes()
+        except Exception:
+            raise e from None
+        saved = load(state_path)
+        for err in _sidebar(herdr, saved, state_path, queue_dir, [], panes, now,
+                            trk_error=f"{type(e).__name__}: {e}"):
+            log(f"sidebar: {err}")
+        save(saved, state_path)
+        raise
+    for bad in () if dry_run else reply.get("invalid", ()):
+        log(f"trk waiting: ask {bad['id']} left out, it breaks the contract: {bad['error']}")
+    return reply["asks"]
+
+
+def _sidebar(herdr, state, state_path, queue_dir, open_asks, panes, now, trk_error=None) -> list[str]:
+    """Draw the needs-you panel; display only, so it never raises. Returns the errors. `trk_error`
+    marks trk's asks as unavailable: the rows then come from the queue files alone."""
     try:
         live = {p.pane_id for p in panes}
         rows = sidebar.rows(queue_dir, sidebar.cache_dir(), open_asks, live, now,
                             sidebar.blocked(panes, sidebar.mode_dir()))
-        sidebar.write_line(state_path.with_name("sidebar.json"), rows, now)
+        sidebar.write_line(state_path.with_name("sidebar.json"), rows, now, trk_error)
         state.sidebar, errors = sidebar.publish(herdr, rows, state.sidebar, live)
         return errors
     except Exception as e:
@@ -278,15 +305,24 @@ def _sidebar(herdr, state, state_path, queue_dir, open_asks, panes, now) -> list
 def refresh_sidebar(trk, herdr, state_path: Path, queue_dir: Path, now: float) -> list[str]:
     """The panel alone, between passes: `hx watch` runs it when the queue folder changes, so a row
     goes the moment herdr-jump's prompt hook deletes its item. It reads trk's open asks and herdr's
-    panes afresh and saves only the panel's field. Returns the errors; a failed read changes nothing."""
+    panes afresh and saves only the panel's field. Returns the errors. A failed herdr read changes nothing; a failed trk
+    read draws the queue-file rows alone, marked trk-down."""
     try:
-        open_asks = trk.waiting()["asks"]
         panes = herdr.panes()
     except Exception as e:
         return [f"{type(e).__name__}: {e}"]
+    errors, trk_error = [], None
+    try:
+        reply = trk.waiting()
+        open_asks = reply["asks"]
+        errors += [f"trk waiting: ask {b['id']} left out, it breaks the contract: {b['error']}"
+                   for b in reply.get("invalid", ())]
+    except Exception as e:                     # the queue files still make rows
+        open_asks, trk_error = [], f"{type(e).__name__}: {e}"
+        errors.append(trk_error)
     with locked(state_path):                   # `hx start` may write state.json meanwhile
         state = load(state_path)
-        errors = _sidebar(herdr, state, state_path, queue_dir, open_asks, panes, now)
+        errors += _sidebar(herdr, state, state_path, queue_dir, open_asks, panes, now, trk_error)
         save(state, state_path)
     return errors
 

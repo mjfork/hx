@@ -66,7 +66,9 @@ class Trk:
                            f"no {contract}.schema.json in {self.contract_dir}")
         errors = list(validator.iter_errors(data))
         if errors:
-            raise TrkError(f"trk {verb}: reply breaks contract {contract}: {errors[0].message}")
+            e = TrkError(f"trk {verb}: reply breaks contract {contract}: {errors[0].message}")
+            e.data = data                # waiting() keeps the asks that pass
+            raise e
         return data
 
     def changes(self, since: int, limit: int | None = None) -> dict:
@@ -74,7 +76,27 @@ class Trk:
         return self.call("changes", "changes", "--since", str(since), *extra)
 
     def waiting(self) -> dict:
-        return self.call("waiting", "waiting", "--all")
+        """`trk waiting --all`. An ask that breaks the contract is dropped, not the reply: the rest is
+        used, and the dropped ones are listed under `invalid` as {"id", "error"} for the caller to log.
+        A break outside the asks still raises."""
+        try:
+            return self.call("waiting", "waiting", "--all")
+        except TrkError as e:
+            if "breaks contract" not in str(e) or not hasattr(e, "data"):
+                raise
+            data = e.data
+        validator = _validators(self.contract_dir)["waiting"]
+        bad = {}
+        for err in validator.iter_errors(data):
+            path = list(err.absolute_path)
+            if len(path) < 2 or path[0] != "asks" or not isinstance(path[1], int):
+                raise TrkError(f"trk waiting: reply breaks contract waiting: {err.message}")
+            bad.setdefault(path[1], err.message)
+        asks = data["asks"]
+        invalid = [{"id": asks[i].get("id") if isinstance(asks[i], dict) else None, "error": msg}
+                   for i, msg in sorted(bad.items())]
+        data = {**data, "asks": [a for i, a in enumerate(asks) if i not in bad]}
+        return {**self._valid("waiting", "waiting", data), "invalid": invalid}
 
     def claims(self) -> dict:
         return self.call("claims", "claims")
