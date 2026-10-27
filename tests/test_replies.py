@@ -1,6 +1,6 @@
 from hx.feed import advance
 from hx.herdr import Pane
-from hx.replies import flatten, replies_owed, route_replies
+from hx.replies import Log, flatten, replies_owed, route_replies
 from hx.state import AskInfo, State
 
 ASKER = Pane("w1:p2", "w1", "s-worker", "done", "/")
@@ -113,9 +113,9 @@ def test_reply_falls_back_to_the_root_orchestrator():
     assert [a.pane for a in acts] == ["w2:p1"]
 
 
-def test_reply_with_no_live_pane_wakes_nobody_and_is_not_owed():
+def test_reply_with_no_live_pane_wakes_nobody_and_stays_owed():
     s = st(); r = live(s, row())
-    assert route_replies(r, s, []) == [] and replies_owed(r, s, []) == []
+    assert route_replies(r, s, []) == [] and replies_owed(r, s, []) == [{**r[0], "held": True}]
 
 
 def test_reply_is_held_while_the_asker_works():
@@ -154,18 +154,18 @@ def test_feed_records_the_last_close_of_each_ask():
 
 def test_reply_with_no_pane_is_held_while_fresh():
     s = st(); r = live(s, row(at="2026-10-19T05:00:00.000Z"))
-    assert replies_owed(r, s, [], fresh_after="2026-10-19T04:55:00.000Z") == r
-    assert replies_owed(r, s, [], fresh_after="2026-10-19T05:05:00.000Z") == []
+    held = replies_owed(r, s, [], fresh_after="2026-10-19T04:55:00.000Z")
+    assert held == [{**r[0], "held": True}]
+    assert replies_owed(held, s, [], fresh_after="2026-10-19T05:05:00.000Z") == held     # UP-0007: never dropped
 
 
 # Codex round 2
 
-def test_stale_reply_that_never_had_a_pane_is_not_sent_when_one_appears():
+def test_stale_reply_that_never_had_a_pane_is_sent_when_one_appears():
     s = st(); r = live(s, row(at="2026-10-19T05:00:00.000Z"))
     held = replies_owed(r, s, [], fresh_after="2026-10-19T04:55:00.000Z")     # kept: fresh, no pane
     late = "2026-10-19T05:05:00.000Z"
-    assert route_replies(held, s, [ASKER], fresh_after=late) == []
-    assert replies_owed(held, s, [ASKER], fresh_after=late) == []
+    assert [a.pane for a in route_replies(held, s, [ASKER], fresh_after=late)] == ["w1:p2"]
 
 
 def test_stale_reply_held_for_a_busy_pane_is_still_sent():
@@ -179,3 +179,48 @@ def test_long_comment_id_is_kept_whole():
     s = st(); cid = "c" * 100
     text = route_replies(live(s, row(comment=cid)), s, [ASKER])[0].text
     assert f"--from-comment {cid} --outcome" in text
+
+
+# UP-0007: a reply is never dropped
+
+EARLY, LATE = "2026-10-19T04:55:00.000Z", "2026-10-19T05:05:00.000Z"
+DRIVER = Pane("w3:p1", "w3", "s-driver", "done", "/")
+PARENTS = {"tr-a": "tr-t", "tr-t": "tr-p", "tr-p": None}
+
+
+def gone(s):
+    """A reply first seen fresh while its asker's pane was gone, and held over its fresh window."""
+    return replies_owed(live(s, row(at="2026-10-19T05:00:00.000Z")), s, [], fresh_after=EARLY)
+
+
+def test_a_reply_nobody_can_hear_goes_to_the_inbox_once_its_window_passes():
+    s = st(); held = gone(s)
+    [log] = route_replies(held, s, [], fresh_after=LATE)
+    assert log == Log("replied:e:tr-a:20", 'REPLY  tr-a  by francis: "Blue.". Its asker is gone; if it answers '
+                      'the ask, trk answer tr-a --from-comment c-1 --outcome "<gist>"')
+    s.done[log.key] = "t"                                   # what reconcile does once the line is written
+    assert route_replies(held, s, [ASKER], fresh_after=LATE) == []      # the asker coming back gets no copy
+    assert replies_owed(held, s, [ASKER], fresh_after=LATE) == []
+
+
+def test_a_fresh_reply_nobody_can_hear_waits_rather_than_going_to_the_inbox():
+    s = st()
+    assert route_replies(gone(s), s, [], fresh_after=EARLY) == []
+
+
+def test_a_reply_goes_to_the_driver_holding_the_root_when_the_asker_is_gone():
+    s = st(); claims = [{"item": "tr-p", "session": "s-driver"}]
+    acts = route_replies(gone(s), s, [DRIVER], claims, PARENTS.get, fresh_after=LATE)
+    assert [(type(a).__name__, a.pane) for a in acts] == [("Wake", "w3:p1")]
+
+
+def test_the_nearest_live_claimant_is_preferred_to_the_root_driver():
+    s = st(); worker = Pane("w4:p1", "w4", "s-w2", "done", "/")
+    claims = [{"item": "tr-p", "session": "s-driver"}, {"item": "tr-t", "session": "s-w2"}]
+    acts = route_replies(gone(s), s, [DRIVER, worker], claims, PARENTS.get, fresh_after=LATE)
+    assert [a.pane for a in acts] == ["w4:p1"]
+
+
+def test_a_reply_that_was_history_when_first_read_never_reaches_the_inbox():
+    s = st(); r = live(s, row(at="2026-10-19T04:00:00.000Z"))     # not held: hx read it late
+    assert route_replies(r, s, [], fresh_after=LATE) == [] and replies_owed(r, s, [], fresh_after=LATE) == []

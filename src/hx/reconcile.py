@@ -178,7 +178,7 @@ def _reconcile(trk, herdr, state_path, inbox, queue_dir, humans, dry_run, cfg, n
 
     def owed():
         state.pending = _owed(closed, state, panes)
-        state.replies = replies_owed(replied, state, panes, fresh_after)
+        state.replies = replies_owed(replied, state, panes, claims, parent, fresh_after)
         state.comments = comments_owed(comments, state, panes, claims, parent, fresh_after)
 
     hold_path = state_path.with_name("hold.json")
@@ -186,7 +186,7 @@ def _reconcile(trk, herdr, state_path, inbox, queue_dir, humans, dry_run, cfg, n
         hold.expire(hold_path, now)
     hold_wakes, hold_lines = hold.wakes(hold.read(hold_path, now), state, panes, hold_path, now)
     actions = hold_wakes + route(open_asks, closed, claims, _ancestors(show, open_asks),
-                                 state, panes, humans) + route_replies(replied, state, panes, fresh_after) \
+                                 state, panes, humans) + route_replies(replied, state, panes, claims, parent, fresh_after) \
         + route_comments(comments, state, panes, claims, parent, fresh_after)
     if dry_run:
         snap = Snapshot(claims, _items(show, claims, state.bindings, log), open_asks, panes,

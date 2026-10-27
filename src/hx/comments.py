@@ -7,21 +7,14 @@ import shlex
 import unicodedata
 from collections.abc import Callable
 from urllib.parse import quote
-from dataclasses import dataclass
 
 from hx.herdr import Pane
-from hx.replies import LIST, _fresh, _safe, flatten
+from hx.replies import LIST, Log, _fresh, _safe, claimant, flatten
 from hx.routing import Wake, _orchestrator, _pane_of
 from hx.state import State
 
 
 PAGE = re.compile(r"[^A-Za-z0-9._@:-]")     # a Needs-you page is "needs-you:<actor>"
-
-
-@dataclass(frozen=True)
-class Log:
-    key: str
-    line: str
 
 
 def _cid(r: dict) -> str:
@@ -62,17 +55,11 @@ def _pane(r: dict, state: State, panes: list[Pane], claims: list[dict],
           parent: Callable[[str], str | None]) -> Pane | None:
     """The live claimant of the item or its nearest claimed ancestor, else the orchestrator or solo
     session of the item's root as trk shows it now (the row's root is the one it had when written)."""
-    item, seen = r.get("item"), set()
+    item = r.get("item")
     if not item:
         return None
-    cur, root = item, None
-    while cur and cur not in seen:
-        seen.add(cur)
-        for c in claims:
-            if c["item"] == cur and (p := _pane_of(c["session"], panes)):
-                return p
-        root, cur = cur, parent(cur)
-    return _pane_of(_orchestrator(root if cur is None else r["root"], state), panes)
+    pane, top = claimant(item, panes, claims, parent)
+    return pane or _pane_of(_orchestrator(top or r["root"], state), panes)
 
 
 def _live(rows: list[dict], state: State, fresh_after: str | None) -> list[dict]:

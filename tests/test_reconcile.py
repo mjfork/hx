@@ -227,6 +227,19 @@ def test_reply_falls_back_to_the_orchestrator_of_the_asks_current_root(trk_home,
     assert [p for p, t in h.wakes if "replied by" in t] == ["w2:p1"]
 
 
+def test_a_reply_whose_asker_is_gone_reaches_the_inbox_after_its_window(trk_home, sh, tree, tmp_path):
+    a = ask_michael(sh, tree)                                # UP-0007: no asker pane, no binding, no claim
+    run_reply(trk_home, tmp_path, FakeHerdr([WORKER]), now=NOW)
+    run_reply(trk_home, tmp_path, FakeHerdr([]), reply_row(a, FRESH), now=NOW)
+    assert "REPLY" not in (tmp_path / "inbox.log").read_text()          # still fresh: it waits
+    for later in (NOW + 700, NOW + 800):                                  # past REPLY_FRESH_S, twice
+        run_reply(trk_home, tmp_path, FakeHerdr([WORKER]) if later == NOW + 800 else FakeHerdr([]), now=later)
+    lines = [x for x in (tmp_path / "inbox.log").read_text().splitlines() if "REPLY" in x]
+    assert len(lines) == 1 and lines[0].endswith(
+        f'REPLY  {a}  by francis: "Blue. Then /clear". Its asker is gone; if it answers the ask, '
+        f'trk answer {a} --from-comment c-1 --outcome "<gist>"')
+
+
 def test_last_pass_at_keeps_milliseconds(trk_home, sh, tree, tmp_path):
     run_reply(trk_home, tmp_path, FakeHerdr([WORKER]), now=NOW)
     assert json.loads((tmp_path / "state.json").read_text())["last_pass_at"].endswith("Z")
