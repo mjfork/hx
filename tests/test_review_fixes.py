@@ -91,11 +91,17 @@ def test_lost_queue_item_is_rewritten(trk_home, sh, tree, tmp_path):
     assert (tmp_path / "inbox.log").read_text().count(f"ASK  {a}") == 1
 
 
-def test_existing_queue_item_is_not_rewritten(tmp_path):
+def test_an_edited_or_re_pinned_queue_item_is_rewritten_keeping_its_first_seen_time(tmp_path):
+    # upstream ask UP-0009 (it replaced "an existing item is never rewritten")
     c = Channels(tmp_path / "inbox.log", tmp_path / "q", {"w1:p2": "w1", "w1:p3": "w1"})
-    c.notify(Notify("k", "michael", "queue", "tr-a", "t", "w1:p2"))
-    c.notify(Notify("k", "michael", "queue", "tr-a", "t", "w1:p3"))
-    assert json.loads((tmp_path / "q" / "hx_tr-a.json").read_text())["pane"] == "w1:p2"
+    f = tmp_path / "q" / "hx_tr-a.json"
+    c.notify(Notify("k", "michael", "queue", "tr-a", "t", "w1:p2", "**Ask:** tr-a: Old?", "tr-a"))
+    f.write_text(json.dumps({**json.loads(f.read_text()), "ts": 1000}))
+    c.notify(Notify("k", "michael", "queue", "tr-a", "t", "w1:p2", "**Ask:** tr-a: Old?", "tr-a"))
+    assert json.loads(f.read_text())["ts"] == 1000
+    c.notify(Notify("k", "michael", "queue", "tr-a", "t", "w1:p3", "**Ask:** tr-a: New?", "tr-a"))
+    item = json.loads(f.read_text())
+    assert (item["pane"], item["ask"], item["label"], item["ts"]) == ("w1:p3", "**Ask:** tr-a: New?", "tr-a", 1000)
 
 
 # Finding 5: any error in the watch loop is logged; a contract or schema break alerts once.

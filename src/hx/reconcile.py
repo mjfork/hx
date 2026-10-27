@@ -6,7 +6,7 @@ from pathlib import Path
 import json
 
 from hx.channels import Channels
-from hx import drafts, finish, hold, needs_you, sidebar
+from hx import done, drafts, finish, hold, needs_you, sidebar
 from hx.comments import Log, comments_owed, route_comments
 from hx.config import Config, load_config
 from hx.feed import FeedResult, advance
@@ -92,6 +92,17 @@ def _items(show, claims: list[dict], bindings: dict, log) -> dict[str, dict]:
     for root in bindings:
         get(root)
     return items
+
+
+def _root(parent):
+    """An item's root: walk its parents up (the walk stops where trk cannot show one)."""
+    def root(item: str) -> str:
+        seen = {item}
+        while (up := parent(item)) and up not in seen:
+            seen.add(up)
+            item = up
+        return item
+    return root
 
 
 def _parent(show, log):
@@ -185,8 +196,10 @@ def _reconcile(trk, herdr, state_path, inbox, queue_dir, humans, dry_run, cfg, n
     if not dry_run:
         hold.expire(hold_path, now)
     hold_wakes, hold_lines = hold.wakes(hold.read(hold_path, now), state, panes, hold_path, now)
-    actions = hold_wakes + route(open_asks, closed, claims, _ancestors(show, open_asks),
-                                 state, panes, humans) + route_replies(replied, state, panes, claims, parent, fresh_after) \
+    modes = sidebar.mode_dir()
+    done.observe(state, panes, claims, _root(parent), now)
+    actions = hold_wakes + done.wakes(state, panes) + route(open_asks, closed, claims, _ancestors(show, open_asks),
+                                 state, panes, humans, lambda pane: sidebar.agentic(pane, modes)) + route_replies(replied, state, panes, claims, parent, fresh_after) \
         + route_comments(comments, state, panes, claims, parent, fresh_after)
     if dry_run:
         snap = Snapshot(claims, _items(show, claims, state.bindings, log), open_asks, panes,
@@ -218,7 +231,7 @@ def _reconcile(trk, herdr, state_path, inbox, queue_dir, humans, dry_run, cfg, n
                 channels.clear(a)
                 ok = True
             elif isinstance(a, Wake):
-                herdr.wake(a.pane, a.text)
+                herdr.wake(a.pane, a.line)
                 woken.add(a.pane)
                 state.drafts.pop(a.pane, None)  # the next wake watches the box afresh
                 ok = True

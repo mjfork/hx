@@ -117,5 +117,6 @@ def route_comments(rows: list[dict], state: State, panes: list[Pane], claims: li
                 acts.append(Log(_inbox_key(state, r), _inbox_line(r)))
         elif p.wakeable:
             by_pane.setdefault(p.pane_id, []).append(r)
-    return acts + [Wake("+".join(_key(state, r) for r in rs), pane, _wake_line(rs))
+    return acts + [Wake("+".join(_key(state, r) for r in rs), pane, _wake_line(rs), kind="comment",
+                        ref=",".join(dict.fromkeys(_safe(_cid(r)) for r in rs)))
                    for pane, rs in by_pane.items()]

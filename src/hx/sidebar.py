@@ -83,6 +83,14 @@ def mode_dir() -> Path:
     return Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude") / "ctx/mode"
 
 
+def agentic(pane: str, folder: Path) -> bool:
+    """Whether turn-mode runs the pane agentic: its turns end in a status line for a driver, not a person's card."""
+    try:
+        return json.loads((folder / f"{pane}.json").read_text()).get("mode") == "agentic"
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
 def _driver(pane: str, folder: Path) -> str | None:
     try:
         d = json.loads((folder / f"{pane}.json").read_text())

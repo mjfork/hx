@@ -30,13 +30,24 @@ class Channels:
         if n.channel == "queue":
             if n.pane is None:
                 return False
-            if (self.queue_dir / f"hx_{n.ask}.json").exists():
-                return True
-            self.queue_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+            path = self.queue_dir / f"hx_{n.ask}.json"
             item = {"pane": n.pane, "workspace": self.workspaces.get(n.pane, ""),
-                    "ask": f"**Ask:** {n.text}\n**Reply with:** `trk answer {n.ask} "
-                           f"--outcome \"<one line>\" --answer -`",
+                    "ask": n.card or f"**Ask:** {n.text}\n**Reply with:** `trk answer {n.ask} "
+                                     f"--outcome \"<one line>\" --answer -`",
                     "cwd": str(Path.home()), "ts": int(time.time())}
+            if n.label:
+                item["label"] = n.label
+            try:
+                old = json.loads(path.read_text())
+            except (OSError, ValueError):
+                old = None
+            if isinstance(old, dict):
+                # An ask edited, or pinned elsewhere, after delivery is rewritten in place (upstream ask UP-0009),
+                # keeping its first-seen time so it holds its place in the list.
+                item["ts"] = old.get("ts", item["ts"])
+                if all(old.get(k) == v for k, v in item.items() if k != "cwd"):
+                    return True
+            self.queue_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
             tmp = self.queue_dir / f".hx_{n.ask}.tmp"
             tmp.write_text(json.dumps(item, indent=2))
             os.chmod(tmp, 0o600)

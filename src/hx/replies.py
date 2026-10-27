@@ -114,4 +114,6 @@ def route_replies(replied: list[dict], state: State, panes: list[Pane], claims: 
                 acts.append(Log(_key(state, r), _inbox_line(r)))
         elif p.wakeable:
             by_pane.setdefault(p.pane_id, []).append(r)
-    return acts + [Wake("+".join(_key(state, r) for r in rs), pane, _line(rs)) for pane, rs in by_pane.items()]
+    return acts + [Wake("+".join(_key(state, r) for r in rs), pane, _line(rs), kind="reply",
+                        ref=",".join(dict.fromkeys(_safe(r["item"]) for r in rs)))
+                   for pane, rs in by_pane.items()]

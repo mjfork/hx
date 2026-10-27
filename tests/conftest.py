@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -121,6 +122,22 @@ def no_quiet_period(monkeypatch):
     monkeypatch.setattr(hx.drafts, "QUIET_S", 0)
 
 
+WAKE_HEADER = re.compile(r"^\[[a-z]+\] id:\S+ from:hx ")
+TYPED: list[list] = []      # every FakeHerdr's typed lines, for the header check below
+
+
+@pytest.fixture(autouse=True)
+def every_wake_has_its_header(request):
+    """Upstream ask UP-0003: every line hx types into a pane opens with `[<kind>] id:<id> from:hx `, nothing before
+    it. Checked on every test's typed lines, except where hx types a person's own answer (hx ask answer)."""
+    TYPED.clear()
+    yield
+    if request.module.__name__.rsplit(".", 1)[-1] in ("test_asks", "test_send"):
+        return
+    bad = [line for typed in TYPED for _, line in typed if not WAKE_HEADER.match(line)]
+    assert not bad, f"typed without the wake header: {bad}"
+
+
 class FakeHerdr:
     """herdr without herdr: returns the given snapshot and records every write in `calls`."""
 
@@ -132,6 +149,8 @@ class FakeHerdr:
         self._workspaces = workspaces if workspaces is not None else \
             [Workspace(w, "") for w in sorted({p.workspace_id for p in panes})]
         self.wakes: list[tuple[str, str]] = []
+        self.typed: list[tuple[str, str]] = []
+        TYPED.append(self.typed)
         self.calls: list[tuple] = []
         self.sidebar: list[tuple] = []      # the needs-you panel's tokens and view (sidebar.py)
 
@@ -142,7 +161,10 @@ class FakeHerdr:
         return self._workspaces
 
     def wake(self, pane_id: str, text: str) -> None:
-        self.wakes.append((pane_id, text))
+        # `typed` is the line as typed; `wakes` drops the automation header (upstream ask UP-0003), which
+        # test_wake_header checks on every kind, so the other tests read the text alone
+        self.typed.append((pane_id, text))
+        self.wakes.append((pane_id, WAKE_HEADER.sub("", text, count=1)))
 
     def read(self, pane_id: str) -> str:
         self.reads.append(pane_id)

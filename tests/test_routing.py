@@ -1,5 +1,7 @@
 from hx.herdr import Pane
-from hx.routing import Clear, Notify, Wake, route
+import json
+
+from hx.routing import Clear, Notify, Wake, card, route
 from hx.state import AskInfo, State
 
 IDLE = Pane("w1:p2", "w1", "s-worker", "done", "/")
@@ -99,3 +101,51 @@ def test_answer_held_while_asker_works():
 def test_answer_with_no_live_session_is_dropped():
     from hx.routing import still_pending
     assert still_pending([answered_row()], st(), []) == []
+
+
+# Upstream ask UP-0009: a person's ask reads like a pane's card, and shows where it can be explained.
+LONG = ("We need a name for the colour.\n\n- **Why:** the *page* has none.\n- More context that runs on. " * 3)
+
+
+def asked(title="Name the colour", sections=None, root="tr-p"):
+    return {**ask(root=root), "title": title, "sections": sections if sections is not None else [
+        {"handle": "question", "body": LONG},
+        {"handle": "options", "body": json.dumps({"options": [{"n": 1, "label": "Red"}, {"n": 2, "label": "**Blue**"},
+                                                               {"n": 3, "label": "Green"}], "recommended": 2})}]}
+
+
+def test_a_card_has_the_question_line_each_option_and_the_reply():
+    assert card(asked()).splitlines() == [
+        "**Ask:** tr-a: We need a name for the colour.", "**Options:**", "1. Red", "2. Blue (recommended)", "3. Green",
+        "**Reply with:** `trk answer tr-a --option <N>` in a terminal (not in a Claude pane, which trk reads as an agent)",
+        "The question may not be on this pane's screen: `trk show tr-a` has it in full."]
+
+
+def test_a_card_takes_a_question_title_and_without_options_asks_for_an_outcome():
+    lines = card(asked("Which colour?", [{"handle": "question", "body": LONG}])).splitlines()
+    assert lines[0] == "**Ask:** tr-a: Which colour?" and "**Options:**" not in lines
+    assert lines[1].startswith('**Reply with:** `trk answer tr-a --outcome "<one line>"`')
+
+
+def test_a_long_first_sentence_is_cut():
+    line = card(asked(sections=[{"handle": "question", "body": "word " * 200}])).splitlines()[0]
+    assert line.endswith("…") and len(line) <= len("**Ask:** tr-a: ") + 240
+
+
+ORCH = Pane("w2:p1", "w2", "s-orch", "done", "/")
+
+
+def pinned(state, panes, agentic=lambda pane: False):
+    acts = route([asked()], [], [], {}, state, panes, {"michael": ["queue"]}, agentic)
+    return [(a.pane, a.label) for a in acts if isinstance(a, Notify)]
+
+
+def test_an_agentic_workers_person_ask_pins_to_the_live_orchestrator():
+    s = st()
+    s.bindings = {"tr-p": {"orchestrator": "s-orch"}}
+    assert pinned(s, [IDLE, ORCH], agentic=lambda pane: pane == "w1:p2") == [("w2:p1", "tr-a")]
+
+
+def test_without_an_orchestrator_the_asker_shows_it_agentic_or_not():
+    assert pinned(st(), [IDLE]) == [("w1:p2", "tr-a")]
+    assert pinned(st(), [IDLE], agentic=lambda pane: True) == [("w1:p2", "tr-a")]

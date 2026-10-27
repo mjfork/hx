@@ -38,6 +38,8 @@ class State:
     places: dict[str, list] = field(default_factory=dict)     # live session -> folders its pane works in (finish.py)
     finish: dict[str, dict] = field(default_factory=dict)     # gone session -> {paths, since}: trees to finish (finish.py)
     hold: dict | None = None                                  # the machine-wide hold hx last saw (hold.py)
+    turns: dict[str, dict] = field(default_factory=dict)      # live session -> {status, n turns ended} (done.py)
+    finished: list[dict] = field(default_factory=list)        # [done] lines still owed to drivers (done.py)
 
 
 def state_dir() -> Path:

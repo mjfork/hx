@@ -221,7 +221,7 @@ def wakes(st: Status, state, panes, path: Path, now: float) -> tuple[list[Wake],
         state.hold = {"id": rec["id"], "by": rec["by"], "reason": rec["reason"], "heard": heard}
         lines = [] if same else [f"HOLD  {rec['id']}  by {rec['by']}: {rec['reason']}"]
         text = hold_text(rec)
-        return [Wake(f"hold:{rec['id']}:{p.session}", p.pane_id, text) for p in live
+        return [Wake(f"hold:{rec['id']}:{p.session}", p.pane_id, text, kind="hold", ref=str(rec["id"])) for p in live
                 if p.wakeable and f"hold:{rec['id']}:{p.session}" not in state.done], lines
     if not seen.get("id"):
         state.hold = None
@@ -234,5 +234,5 @@ def wakes(st: Status, state, panes, path: Path, now: float) -> tuple[list[Wake],
         return [], lines
     state.hold = {**seen, "ended": ended, "unreadable": False}
     text = resume_text(seen)
-    return [Wake(f"resume:{hid}:{p.session}", p.pane_id, text) for p in live
+    return [Wake(f"resume:{hid}:{p.session}", p.pane_id, text, kind="resume", ref=str(hid)) for p in live
             if p.session in owed and p.wakeable], lines

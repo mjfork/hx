@@ -3,6 +3,7 @@ hx sidebar setup: the commands systemd, herdr and people run."""
 import argparse
 import difflib
 import getpass
+import hashlib
 import json
 import math
 import os
@@ -16,6 +17,7 @@ from hx.config import config_path, load_config
 from hx.feed import SchemaChanged
 from hx.herdr import Herdr, HerdrError
 from hx.reconcile import reconcile, refresh_sidebar
+from hx.routing import header
 from hx.send import send
 from hx.showcache import ShowCache
 from hx.start import StartError, start
@@ -262,7 +264,11 @@ def main(argv: list[str] | None = None) -> int:
         if args.wait < drafts.QUIET_S:
             print(f"hx send: --wait must be at least {drafts.QUIET_S} (the quiet window)", file=sys.stderr)
             return 2
-        result = send(Herdr(), args.pane, args.text, args.wait)
+        # A session's line, so it carries the automation header (upstream ask UP-0003); its id is the same for the
+        # same text, so a resend reads as one. `hx ask answer` types a person's answer and carries none.
+        text = " ".join(args.text.split())
+        result = send(Herdr(), args.pane, f"{header('send', 'send-' + hashlib.sha256(text.encode()).hexdigest()[:8])} {text}",
+                      args.wait)
         for pane, r in result.items():
             print(f"sent  {pane}" if r == "sent" else f"refused  {pane}  {r.removeprefix('refused: ')}")
         return 0 if all(r == "sent" for r in result.values()) else 1

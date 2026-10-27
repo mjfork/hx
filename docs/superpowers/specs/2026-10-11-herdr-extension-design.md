@@ -284,6 +284,33 @@ From beads-alterantive's request (hx-replied-1) and sme-herdr-env's review (hx-r
 - A working pane holds its replies until it goes idle, as for answers. A held reply is dropped when its ask closes, even if it reopens later. A reply with no pane to wake waits while it is fresh (an orchestrator can be restarting or not yet bound). Then it goes to the inbox once, as `REPLY  <ask>  by <actor>: "<excerpt>". Its asker is gone; if it answers the ask, trk answer <ask> --from-comment <id> --outcome "<gist>"`, and it is done: a pane that comes back later gets no copy. A reply held that long is woken if a pane is live by then. A reply on an ask missing from `trk waiting` is never sent. Each pass routes from one feed read and one `trk waiting` snapshot. If an ask closes and reopens in the moment between the two, a held reply can still reach the reopened ask. That is accepted: the line asks the session to judge the comment, and a re-read inside the pass would break the one-snapshot rule. Ids keep every safe character, at any length.
 - A reply row more than 10 minutes old when hx first reads it is history and wakes nobody: hx was down or behind. Drivers pause when only people block, so such a reply waits for the driver's 8 h fallback timer. That is accepted.
 
+## Amendment of 2026-10-27 (upstream asks UP-0003, UP-0006, UP-0009)
+
+From a box's upstream asks, accepted on the channel; the box's owner asked for the header and the cards.
+
+**9. Every line hx types opens with a header.** `[<kind>] id:<id> from:hx `, then the text, which keeps its old `[hx] `,
+`HOLD (hx` or `RESUME (hx` prefix for one release. `<kind>` is ask, answered, withdrawn, reply, comment, hold, resume,
+done or send; `<id>` is the ask, comment or hold the line is about, else its dedup key, never with a space. A session's
+rules read a line that opens this way as automation, never as a person's answer, whatever free text from trk follows.
+`hx send` adds `[send] id:send-<hash of the text>`. `hx ask answer`, which types a person's own answer, adds none.
+
+**10. A worker's finished turn wakes its driver.** Each pass notes every live session's herdr status. A session hx maps
+as a worker that was working and is now idle or done has finished a turn, and its driver is owed one line:
+`[done] id:done:<session>:<n> from:hx [hx] <pane> (<item>) finished its turn. Run trk show <item>.` The driver is the
+session that started it (the binding's recorded parent), else the session holding the root's claim, the orchestrator
+first. A working driver holds the line (several are one line for one pane), a gone driver gets none, and a line still
+owed after 30 minutes is dropped. A turn shorter than the pass interval can be missed. The line does not quote the
+worker's status line: the screen's last line is not reliably it.
+
+**11. A trk ask waiting on a person reads like a pane's card.** The queue item's text is the ask's question line (its
+title when that is a question, else the first sentence of `## question`, cut at 240 characters), one numbered line per
+`## options` entry with the recommended one marked, `**Reply with:**` the shortest `trk answer` (`--option <N>`, else
+`--outcome`), to run in a terminal, and a note that the pinned pane may not show the question. The item has
+`label: <ask id>`, and herdr-jump (0.20.2) names it by that, and shows it while its pane works. It is pinned to the
+root's live orchestrator, else the asker's pane if that pane is not agentic (turn-mode), else the asker's pane anyway.
+It is rewritten when its text, pane or label changes, keeping its first-seen `ts`. There is no inbox pane to pin to;
+`inbox.log` is a file.
+
 ## Section 3: moving off herdr-projects (approved)
 
 | Today | After |
