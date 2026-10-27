@@ -291,6 +291,7 @@ With no config file, asks go to your user name on the console channel only.
 | `hx needs-you --line` | the tab bar's text: `⚑ 3 · tr-z58a0 38` (count, then the top-scored ask), nothing when no one waits, `hx stale` when the watcher has not written for 2 minutes |
 | `hx needs-you --json` | the queue as cards, for a page that answers by tap: one per live pane's item, with its space, session, cache time left, the open trk ask it names (`trk_ask`), its `sha`, and the Needs-you section parsed into asks, options and `reply_with` (each with `tap`: false for a `!` or `/` reply, a `<placeholder>`, prose around the replies, or a reply two asks share). A section off the format gives `asks: null` and only `raw`. hx's own `hx_*` items are left out: trk shows those asks. Each card has a `kind`: `ask`, or `blocked` for a pane held on a dialog with no card of its own, which comes first and has no `asks` and no `sha`, so `hx answer` never types into it |
 | `hx answer <pane> --sha S --session X [--wait 45] "<reply>"` | type a reply into the ask a card showed, by `hx send`'s rule. It refuses a reply that starts with `!` or `/` or holds a control character, an ask it answered already (the same pane, text and time asked; the same words asked again later are a new ask), an item that is gone or whose text changed (its sha), and a pane that runs another session (`--session ''` for a pane with none); it checks the item and session again right before typing. Exit 0 sent, 1 refused, 2 bad --wait |
+| `hx --version [--json]` | the version and the commit hx was installed from: `hx 0.1.0 (175e440, clean)`, or JSON with `name`, `version`, `commit` (the full sha, null when hx was built outside a checkout) and `dirty` (the checkout had uncommitted changes). An editable install reads its checkout live; a `--no-editable` copy reports the sha baked into its wheel at build time. It reads no config and needs neither trk, herdr nor the watcher, so an installer can ask a box what it runs |
 
 **The hold file** is `~/.local/state/hx/hold.json`:
 `{"id", "reason", "by", "since", "until"}`, times in UTC like `2027-01-15T08:00:00Z`, `until`
@@ -372,6 +373,8 @@ systemctl --user restart hx     # macOS: launchctl kickstart -k gui/$(id -u)/com
 With `--no-editable`, run `./install.sh --no-editable --force --no-service` after the pull, then restart the
 service.
 
+`hx --version` names what is installed, the `--no-editable` copy included, so a rerun can skip an install that is already at the commit it wants.
+
 **From herdr-extension** (hx's old name): pull, then run `./install.sh` once. It moves
 `~/.config/herdr-extension`, `~/.local/state/herdr-extension` and
 `~/.local/state/herdr-extension-install` to their `hx` names, stops and removes
@@ -426,6 +429,7 @@ The tests need `trk` on PATH. The design, its amendments and the implementation 
 | `claude/skills/hx-work/` | the skill a solo session runs |
 | `systemd/`, `launchd/` | the service templates the installer fills in (Linux, macOS) |
 | `install.sh` | install, uninstall, make-bundle |
+| `hatch_build.py` | the build hook that writes the checkout's commit into the wheel, for `hx --version` after a `--no-editable` install |
 | `scripts/sync-contract.sh` | refresh the contract copy from a trk checkout |
 | `scripts/launch-guard.sh` | says whether the box can take another session (installed by default on Linux) |
 | `scripts/claude-worker` | starts a worker session that auto-compacts at 250k tokens (installed by default) |

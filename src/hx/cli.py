@@ -1,5 +1,5 @@
 """hx reconcile [--dry-run] · hx watch · hx hold / resume / held · hx send · hx needs-you --line / --json · hx answer ·
-hx sidebar setup: the commands systemd, herdr and people run."""
+hx sidebar setup · hx --version [--json]: the commands systemd, herdr, installers and people run."""
 import argparse
 import difflib
 import getpass
@@ -190,8 +190,26 @@ def _sidebar_setup(config: Path, dry_run: bool) -> int:
     return 0
 
 
+def _version(argv: list[str]) -> int:
+    """`hx --version [--json]`, answered before the verb parser so it needs no verb and reads no config: an
+    installer asks a box which hx it runs, with no herdr, trk or watcher up."""
+    from hx import version
+
+    extra = [arg for arg in argv if arg not in ("--version", "--json")]
+    if extra:
+        print(f"hx --version: takes only --json, not {' '.join(extra)}", file=sys.stderr)
+        return 2
+    reply = version.report()
+    print(json.dumps(reply) if "--json" in argv else version.text(reply))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(prog="hx")
+    given = list(sys.argv[1:] if argv is None else argv)
+    if "--version" in given[:2]:
+        return _version(given)
+    p = argparse.ArgumentParser(prog="hx", description="`hx --version [--json]` prints the version and the commit "
+                                                       "hx was installed from.")
     sub = p.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("reconcile")
     r.add_argument("--dry-run", action="store_true")
