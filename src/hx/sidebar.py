@@ -137,14 +137,17 @@ def match(name: str, item: dict, open_ids) -> str | None:
 
 
 def rows(queue: Path, cache: Path, open_asks: list[dict], live: set[str], now: float,
-         dialogs: set[str] = frozenset()) -> dict[str, Row]:
+         dialogs: set[str] = frozenset(), busy: set[str] = frozenset()) -> dict[str, Row]:
     """One row per live pane with a queued item; of two items on a pane, the higher score wins.
-    Then a dialog row for each pane of `dialogs` (see blocked()) that has none."""
+    Then a dialog row for each pane of `dialogs` (see blocked()) that has none.
+    A pane's own ask (not an hx_ item, which is a trk ask waiting on a person) is left out while the pane is
+    `busy` (herdr says working): something set it going without the prompt hook that takes its item off the queue (a background
+    task, a timed wake), and it isn't sitting at the ask. Its file stays; the turn's end decides whether it returns."""
     asks = {a["id"]: a for a in open_asks}
     out: dict[str, Row] = {}
     for name, item in _items(queue):
         pane = item["pane"]
-        if pane not in live:
+        if pane not in live or (pane in busy and not name.startswith("hx_")):
             continue
         ask = match(name, item, asks)
         left, working, ttl = cache_left(pane, cache, now)

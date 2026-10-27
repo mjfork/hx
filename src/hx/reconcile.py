@@ -294,7 +294,8 @@ def _sidebar(herdr, state, state_path, queue_dir, open_asks, panes, now, trk_err
     try:
         live = {p.pane_id for p in panes}
         rows = sidebar.rows(queue_dir, sidebar.cache_dir(), open_asks, live, now,
-                            sidebar.blocked(panes, sidebar.mode_dir()))
+                            sidebar.blocked(panes, sidebar.mode_dir()),
+                            {p.pane_id for p in panes if p.status == "working"})
         sidebar.write_line(state_path.with_name("sidebar.json"), rows, now, trk_error)
         state.sidebar, errors = sidebar.publish(herdr, rows, state.sidebar, live)
         return errors

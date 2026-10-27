@@ -118,6 +118,22 @@ def test_row_without_a_trk_ask_is_unscored(dirs):
     assert (row.ask, row.score) == (None, None)
 
 
+def test_a_working_panes_own_ask_is_left_out_and_its_file_kept(dirs):
+    """A background task or timed wake sets a pane going without the prompt hook that takes its item off."""
+    queue, cache = dirs
+    queue_item(queue, "w1_p3.json", "w1:p3", "**Ask:** merge it?")
+    assert sidebar.rows(queue, cache, [], {"w1:p3"}, NOW, busy={"w1:p3"}) == {}
+    assert (queue / "w1_p3.json").exists()
+    assert "w1:p3" in sidebar.rows(queue, cache, [], {"w1:p3"}, NOW)          # idle again: it shows
+
+
+def test_a_trk_ask_on_a_working_pane_still_shows(dirs):
+    queue, cache = dirs
+    queue_item(queue, "hx_tr-aaaaa.json", "w1:p1", "x")
+    assert sidebar.rows(queue, cache, [waiting("tr-aaaaa", 4.0)], {"w1:p1"}, NOW, busy={"w1:p1"})["w1:p1"].ask \
+        == "tr-aaaaa"
+
+
 def test_ask_without_an_urgency_key_is_unscored(dirs):
     """Before trk's urgency score ships (tr-qwwsc), every row is unscored."""
     queue, cache = dirs
