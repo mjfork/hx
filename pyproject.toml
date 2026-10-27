@@ -1,8 +1,14 @@
 [project]
 name = "hx"
 version = "0.1.0"
+description = "Routes trk asks to the right Claude Code session in herdr, and runs each work item in its own Space"
 requires-python = ">=3.12"
 dependencies = ["jsonschema>=4.26"]
+license = {file = "LICENSE"}
+authors = [{name = "Michael Fork"}]
+
+[project.urls]
+Repository = "https://github.com/mjfork/hx"
 
 [project.scripts]
 hx = "hx.cli:main"

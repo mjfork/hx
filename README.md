@@ -73,7 +73,14 @@ Optional, used when present:
 
 ### Get the code onto the machine
 
-This repo may have no hosted home. Copy it from a machine that has it:
+```bash
+git clone https://github.com/mjfork/hx ~/src/hx
+```
+
+hx needs trk and herdr. To install them together at versions known to work together, use
+[gatehouse](https://github.com/mjfork/gatehouse) instead.
+
+A machine without GitHub access can take a copy from one that has it:
 
 ```bash
 # on a machine with the repo: one file, with the whole history
