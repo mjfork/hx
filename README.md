@@ -119,7 +119,8 @@ Four extras keep many sessions at once cheap and safe. All four are on by defaul
 `flock`), so off Linux they are skipped unless you name them (`--launch-guard`, `--mem-gate`). The
 hooks need `jq`. A script already on PATH that hx did not put there, or that was edited since, is
 left alone with a warning, unless you name that extra (then it refuses) or pass `--force` (then it
-is replaced and kept as `<name>.bak-<time>`). A copy an earlier hx release installed is replaced.
+is replaced and kept as `<name>.bak-<time>`). A copy an earlier hx release installed is replaced. A
+hook `settings.json` already runs from elsewhere (its own `mem-gate.sh`, say) is not added a second time.
 
 - The launch guard links `scripts/launch-guard.sh` into `~/.local/bin`. `hx start` then waits while
   a machine-wide hold is on (`hx hold`), the 1-minute load is above 2 × CPUs, less than 16 GB of

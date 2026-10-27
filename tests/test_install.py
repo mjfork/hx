@@ -569,6 +569,18 @@ def test_someone_elses_worker_is_left_alone_unless_named_or_forced(box):
     assert worker.is_symlink() and list(worker.parent.glob("claude-worker.bak-*"))
 
 
+def test_a_hook_the_box_already_runs_from_elsewhere_is_not_added_twice(box):
+    s = box.home / ".claude/settings.json"
+    s.parent.mkdir(parents=True)
+    mine = {"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "/x/hooks/mem-gate.sh"}]}]}}
+    s.write_text(json.dumps(mine))
+    out = box()
+    assert "already runs a mem-gate.sh from elsewhere" in out.stdout
+    assert hook_commands(box.home) == {"/x/hooks/mem-gate.sh", f"{REPO.resolve()}/claude/hooks/checkout-freshness.sh"}
+    box()   # hx's own entry is not "elsewhere": a second run keeps it, once
+    assert hook_commands(box.home) == {"/x/hooks/mem-gate.sh", f"{REPO.resolve()}/claude/hooks/checkout-freshness.sh"}
+
+
 def test_a_copy_an_earlier_release_installed_is_replaced(box):
     box("--no-editable")
     worker = box.home / ".local/bin/claude-worker"

@@ -313,6 +313,31 @@ wanted_hooks() { # the --hook triples the options asked for, one word per line
   return 0
 }
 
+other_hook() { # settings.json already runs a script of this name from somewhere other than this checkout
+  [[ -f $SETTINGS ]] || return 1
+  "$PY" - "$SETTINGS" "$1" "$REPO" <<'PY'
+import json, sys
+try:
+    hooks = json.load(open(sys.argv[1], encoding="utf-8")).get("hooks") or {}
+except (OSError, ValueError, AttributeError):
+    sys.exit(1)   # check_settings reports a bad file
+name, repo = sys.argv[2], sys.argv[3]
+cmds = [h.get("command", "") for es in hooks.values() for e in es for h in e.get("hooks", [])]
+sys.exit(0 if any(name in c and repo not in c for c in cmds) else 1)
+PY
+}
+
+skip_other_hooks() { # a box that runs its own copy of a hook keeps it: never two of the same hook
+  [[ -n $PY ]] || find_python || return 0
+  if ((MEM_GATE)) && other_hook mem-gate.sh; then
+    warn "mem-gate: settings.json already runs a mem-gate.sh from elsewhere; leaving it alone"; MEM_GATE=0
+  fi
+  if ((FRESHNESS)) && other_hook checkout-freshness.sh; then
+    warn "freshness hook: settings.json already runs a checkout-freshness.sh from elsewhere; leaving it alone"; FRESHNESS=0
+  fi
+  return 0
+}
+
 check_settings() { # before any change: settings.json can take the hooks asked for
   local hooks=() l
   while IFS= read -r l; do hooks+=("$l"); done < <(wanted_hooks)   # no mapfile: macOS has bash 3.2
@@ -674,6 +699,7 @@ check_folders
 check_actor
 check_skills
 check_bins
+skip_other_hooks
 check_settings
 say "== folders"
 move_folder "$STATE_HOME/$OLD-install" "$MARKS"   # install marks only: no watcher writes them
