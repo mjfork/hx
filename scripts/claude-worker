@@ -3,7 +3,7 @@
 # Use it for ticket and trk workers and other long single-task sessions, never for coordinators:
 # a worker that compacts early re-sends far less context on every turn.
 # Auto-compact fires about 11-19K below the window (measured: window 80K fired at 68.8K).
-# hx start runs solo sessions under it when it is on PATH; install it with hx's install.sh --claude-worker.
+# hx start runs solo sessions under it when it is on PATH; hx's install.sh puts it there.
 if [[ "${1:-}" == "--help" ]]; then
   echo "usage: claude-worker [claude args...]   (CLAUDE_CODE_AUTO_COMPACT_WINDOW defaults to 250000)"
   exit 0

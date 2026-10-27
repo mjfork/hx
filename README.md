@@ -57,13 +57,13 @@ herdr holds the Claude Code sessions. hx is a small background watcher in betwee
 Optional, used when present:
 
 - **claude-worker**: a wrapper around `claude` that makes a worker session auto-compact at 250k
-  tokens. hx ships one (`scripts/claude-worker`, installed with `--claude-worker`). If it is on
+  tokens. hx ships one (`scripts/claude-worker`, installed by default). If it is on
   PATH, solo sessions run under it; otherwise they run under `claude`.
 - **eng-toolkit** (Claude Code plugin): for a work item with a JIRA key, the hx-work skill
   hands each stage gate to its kickoff, implement and verification skills. Without it, the skill
   runs the gates itself.
 - **launch-guard.sh**: holds a launch when the machine is busy. hx ships one
-  (`scripts/launch-guard.sh`, installed with `--launch-guard`); any `launch-guard.sh` on PATH is
+  (`scripts/launch-guard.sh`, installed by default on Linux); any `launch-guard.sh` on PATH is
   used. Without one, every `hx start` goes ahead.
 - **ticket-deps.sh**: fills a new worktree's `node_modules` in the background.
 - **The herdr needs-you queue** (`~/.herdr-queue`): the installer adds the `queue` channel when
@@ -114,28 +114,32 @@ The installer:
    it is the launchd agent `~/Library/LaunchAgents/com.hx.watch.plist`, logging to
    `~/.local/state/hx/watch.log`.
 
-Four extras are off unless you ask for them. They are for a box that runs many sessions at once,
-and need Linux (the guard reads `/proc` and uses `flock`) and `jq` (the hooks):
+Four extras keep many sessions at once cheap and safe. All four are on by default; each has a
+`--no-*` option to skip it. The launch guard and the memory gate read `/proc` (the guard also uses
+`flock`), so off Linux they are skipped unless you name them (`--launch-guard`, `--mem-gate`). The
+hooks need `jq`. A script already on PATH that hx did not put there, or that was edited since, is
+left alone with a warning, unless you name that extra (then it refuses) or pass `--force` (then it
+is replaced and kept as `<name>.bak-<time>`). A copy an earlier hx release installed is replaced.
 
-- `--launch-guard` links `scripts/launch-guard.sh` into `~/.local/bin`. `hx start` then waits while
+- The launch guard links `scripts/launch-guard.sh` into `~/.local/bin`. `hx start` then waits while
   a machine-wide hold is on (`hx hold`), the 1-minute load is above 2 × CPUs, less than 16 GB of
   memory is free, swap or the root disk is 95 % full, or the last launch was under 30 seconds ago.
   Each limit is a `DISPATCH_*` variable in the script's header. Other launchers can call it too:
   `launch-guard.sh <label>` exits 0 (go) or 3 (held, with the reason on stderr). It refuses to
   replace a different `launch-guard.sh` unless you pass `--force`; the old one is kept as
   `launch-guard.sh.bak-<time>`.
-- `--claude-worker` links `scripts/claude-worker` into `~/.local/bin`, and solo sessions run under
+- claude-worker links `scripts/claude-worker` into `~/.local/bin`, and solo sessions run under
   it. It starts `claude` with `CLAUDE_CODE_AUTO_COMPACT_WINDOW` at 250000 (set the variable to
   change it), passed as `--settings` so a larger window in your `settings.json` does not override
   it. A worker that compacts early re-sends far less context on each turn. Use it for any worker
   you start yourself too; keep coordinators on plain `claude`. While a launch guard is installed,
   it also refuses to start during a machine-wide hold.
-- `--mem-gate` adds `claude/hooks/mem-gate.sh` to `~/.claude/settings.json` as a PreToolUse hook on
+- The memory gate adds `claude/hooks/mem-gate.sh` to `~/.claude/settings.json` as a PreToolUse hook on
   Bash. While less than 16 GB of memory is free (`MEM_GATE_MB`) or 20 test processes run
   (`MEM_GATE_MAX_PROCS`), it turns away heavy commands (jest, vitest, tsc, playwright, npm
   test/build; `MEM_GATE_PATTERN` replaces the list) and tells the session to wait and retry.
   `MEM_GATE_OFF=1` turns it off.
-- `--freshness-hook` adds `claude/hooks/checkout-freshness.sh` as a SessionStart hook. A session
+- The freshness hook adds `claude/hooks/checkout-freshness.sh` as a SessionStart hook. A session
   whose checkout is behind its base branch (`BASE_BRANCH`, else the remote's default branch) is told
   how far behind, before it builds or tests anything.
 
@@ -152,10 +156,11 @@ yourself to tell sessions that start during a hold.
 | `--no-service` | skip the systemd service; run `hx watch` yourself |
 | `--no-sidebar` | leave herdr's `config.toml` alone: no needs-you list in the Agents panel |
 | `--force` | reinstall the command and replace a differing skill, launch guard or claude-worker |
-| `--launch-guard` | put `launch-guard.sh` on PATH, so `hx start` waits while the box is busy |
-| `--claude-worker` | put `claude-worker` on PATH, so solo sessions auto-compact at 250k tokens |
-| `--mem-gate` | add the memory-gate hook for heavy test and build commands |
-| `--freshness-hook` | add the hook that tells a session its checkout is stale |
+| `--no-claude-worker` | skip `claude-worker`, which makes solo sessions auto-compact at 250k tokens |
+| `--no-launch-guard` | skip `launch-guard.sh`, which makes `hx start` wait while the box is busy |
+| `--no-mem-gate` | skip the memory-gate hook for heavy test and build commands |
+| `--no-freshness-hook` | skip the hook that tells a session its checkout is stale |
+| `--launch-guard` etc. | install that extra even off Linux, and refuse to replace someone else's copy |
 | `--uninstall` | remove what the installer added (see [Uninstall](#uninstall)) |
 
 Rerunning with the other of editable and `--no-editable` swaps the skill's link and copy; add
@@ -414,8 +419,8 @@ The tests need `trk` on PATH. The design, its amendments and the implementation 
 | `systemd/`, `launchd/` | the service templates the installer fills in (Linux, macOS) |
 | `install.sh` | install, uninstall, make-bundle |
 | `scripts/sync-contract.sh` | refresh the contract copy from a trk checkout |
-| `scripts/launch-guard.sh` | says whether the box can take another session (`--launch-guard`) |
-| `scripts/claude-worker` | starts a worker session that auto-compacts at 250k tokens (`--claude-worker`) |
+| `scripts/launch-guard.sh` | says whether the box can take another session (installed by default on Linux) |
+| `scripts/claude-worker` | starts a worker session that auto-compacts at 250k tokens (installed by default) |
 | `scripts/merge_settings.py` | adds and removes hx's hooks in `settings.json` |
 | `claude/hooks/` | Claude Code hooks: `hold-notice.sh`, `mem-gate.sh`, `checkout-freshness.sh` |
 | `tests/` | the suite |

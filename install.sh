@@ -2,7 +2,7 @@
 # Install hx from this checkout, or remove it again. Safe to re-run.
 #
 #   ./install.sh [--dry-run] [--no-editable] [--no-service] [--no-sidebar] [--force] [--me NAME]
-#                [--launch-guard] [--claude-worker] [--mem-gate] [--freshness-hook]
+#                [--no-launch-guard] [--no-claude-worker] [--no-mem-gate] [--no-freshness-hook]
 #   ./install.sh --uninstall [--dry-run]
 #   ./install.sh make-bundle [FILE]
 #
@@ -13,12 +13,15 @@ shopt -u patsub_replacement 2>/dev/null || true   # bash 5.2: keep & in a path l
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
 SKILLS=(hx-work)
 UNIT=hx.service
-GUARD=launch-guard.sh   # --launch-guard and --claude-worker put these scripts/ on PATH, where hx start finds them
+GUARD=launch-guard.sh   # the launch guard and claude-worker go on PATH, where hx start finds them
 ALL_BINS=($GUARD claude-worker)
 OLD=herdr-extension      # hx's name before the rename: its folders, unit and uv tool move over
 
 DRY=0 UNINSTALL=0 EDITABLE=1 FORCE=0 SERVICE=1 SIDEBAR=1 ME=${USER:-$(id -un)} MODE=install BUNDLE=
-LAUNCH_GUARD=0 CLAUDE_WORKER=0 MEM_GATE=0 FRESHNESS=0
+# The extras are on by default; the launch guard and the memory gate read /proc, so only on Linux.
+# ASKED: the ones named on the command line, which refuse a differing script instead of skipping it.
+LINUX=0; [[ $(uname -s) == Linux ]] && LINUX=1
+LAUNCH_GUARD=$LINUX CLAUDE_WORKER=1 MEM_GATE=$LINUX FRESHNESS=1 ASKED=:
 
 usage() {
   cat <<'EOF'
@@ -27,8 +30,8 @@ Usage: install.sh [options]
 
 Installs hx from this checkout: the `hx` command (with uv), the hx-work Claude Code skill, a
 starter config if none exists, the needs-you list in herdr's Agents panel, and the watcher as a
-systemd user service. Opt-in extras for a box that runs many sessions at once: a launch guard,
-a worker wrapper and two Claude Code hooks.
+systemd user service. It also installs four extras that keep many sessions cheap and safe: a
+worker wrapper, a launch guard and two Claude Code hooks. Each has a --no-* option to skip it.
 
 Options:
   --dry-run       print what would happen and change nothing
@@ -39,15 +42,22 @@ Options:
   --force         reinstall the hx command even if uv already has it, and replace a skill that
                   differs from the repo copy (the old one is kept as ~/.local/share/hx-skill-backups/)
   --me NAME       the trk actor who hears asks, for a new config (default: your user name)
-  --launch-guard  put launch-guard.sh on PATH (~/.local/bin): hx start then waits while the box is
-                  held, loaded, short of memory, swap or disk, or launched a session under 30s ago
-  --claude-worker put claude-worker on PATH: solo sessions then run under it and auto-compact at
-                  250k tokens (CLAUDE_CODE_AUTO_COMPACT_WINDOW), re-sending less context each turn
-  --mem-gate      add the mem-gate hook to ~/.claude/settings.json: heavy test and build commands
-                  wait while memory is short or many test processes run
-  --freshness-hook
-                  add the checkout-freshness hook to ~/.claude/settings.json: a session whose
+  --no-claude-worker
+                  skip claude-worker, which goes on PATH (~/.local/bin): solo sessions run under it
+                  and auto-compact at 250k tokens (CLAUDE_CODE_AUTO_COMPACT_WINDOW), re-sending
+                  less context each turn
+  --no-launch-guard
+                  skip launch-guard.sh, which goes on PATH: hx start waits while the box is held,
+                  loaded, short of memory, swap or disk, or launched a session under 30s ago
+                  (Linux only; skipped elsewhere unless --launch-guard asks for it)
+  --no-mem-gate   skip the mem-gate hook in ~/.claude/settings.json: heavy test and build
+                  commands wait while memory is short or many test processes run (Linux only)
+  --no-freshness-hook
+                  skip the checkout-freshness hook in ~/.claude/settings.json: a session whose
                   checkout is behind its base branch is told so when it starts
+  --launch-guard, --claude-worker, --mem-gate, --freshness-hook
+                  install that extra even where it is skipped by default, and refuse (without
+                  --force) to replace a differing copy instead of leaving it alone
   -h, --help      show this help
 
 make-bundle [FILE]  write the whole repo, with its history, to one file (default
@@ -75,10 +85,14 @@ while (($#)); do
     --no-service) SERVICE=0 ;;
     --no-sidebar) SIDEBAR=0 ;;
     --force) FORCE=1 ;;
-    --launch-guard) LAUNCH_GUARD=1 ;;
-    --claude-worker) CLAUDE_WORKER=1 ;;
+    --launch-guard) LAUNCH_GUARD=1 ASKED+=$GUARD: ;;
+    --claude-worker) CLAUDE_WORKER=1 ASKED+=claude-worker: ;;
     --mem-gate) MEM_GATE=1 ;;
     --freshness-hook) FRESHNESS=1 ;;
+    --no-launch-guard) LAUNCH_GUARD=0 ;;
+    --no-claude-worker) CLAUDE_WORKER=0 ;;
+    --no-mem-gate) MEM_GATE=0 ;;
+    --no-freshness-hook) FRESHNESS=0 ;;
     --me) shift; [[ $# -gt 0 ]] || die "--me needs a name"; ME=$1 ;;
     make-bundle) MODE=bundle; if [[ ${2:-} != "" && ${2:-} != -* ]]; then BUNDLE=$2; shift; fi ;;
     -h | --help) usage; exit 0 ;;
@@ -195,18 +209,34 @@ bin_state() { # linked | same | differs | dangling | absent for one of scripts/ 
   else say differs; fi
 }
 
-check_bins() { # refuse to replace a script that differs from the repo copy, unless --force
-  local b differing=()
-  for b in ${BINS[@]+"${BINS[@]}"}; do [[ $(bin_state "$b") == differs ]] && differing+=("$b"); done
+ours() { # this script put the script there and it is unedited: an older release, safe to replace
+  local dest=$BIN_DIR/$1
+  [[ -e $MARKS/bin-$1 ]] || return 1
+  [[ -L $dest ]] || [[ $("${SHA[@]}" <"$dest" | cut -d' ' -f1) == "$(cat "$MARKS/bin-$1")" ]]
+}
+
+check_bins() { # an earlier release of ours is replaced; anyone else's copy is refused or left alone, unless --force
+  local b k differing=() keep=()
+  for b in ${BINS[@]+"${BINS[@]}"}; do
+    [[ $(bin_state "$b") == differs ]] && ! ours "$b" && differing+=("$b")
+  done
   ((${#differing[@]})) || return 0
   say "== scripts in $BIN_DIR that differ from the repo copy: ${differing[*]}"
   if ((FORCE)); then
     say "--force given: they will be replaced; the old ones are kept as <name>.bak-<time>"
-  elif ((DRY)); then
-    say "[dry-run] a real run would refuse here; add --force to replace them"
-  else
-    die "the scripts above differ from the repo copy (your own, local edits, or a link elsewhere). Nothing was changed. Run again with --force to replace them."
+    return 0
   fi
+  for b in ${differing[@]+"${differing[@]}"}; do
+    [[ $ASKED == *:$b:* ]] && continue
+    warn "$b: not ours (your own, local edits, or a link elsewhere); leaving it alone. Run again with --force to replace it."
+    for k in ${BINS[@]+"${BINS[@]}"}; do [[ $k == "$b" ]] || keep+=("$k"); done
+    BINS=(${keep[@]+"${keep[@]}"}) keep=()
+  done
+  for b in ${differing[@]+"${differing[@]}"}; do
+    [[ $ASKED == *:$b:* ]] || continue
+    if ((DRY)); then say "[dry-run] a real run would refuse here; add --force to replace them"; return 0; fi
+    die "the scripts above differ from the repo copy (your own, local edits, or a link elsewhere). Nothing was changed. Run again with --force to replace them."
+  done
 }
 
 put_bin() { # and remember that this script put it there, so --uninstall removes only its own

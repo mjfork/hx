@@ -10,6 +10,7 @@ import pytest
 REPO = Path(__file__).parent.parent
 SCRIPT = REPO / "install.sh"
 STUB = '#!/bin/bash\necho "$(basename "$0") $*" >> "$HOME/calls.log"\n'
+UNAME = '#!/bin/bash\necho "${FAKE_UNAME:-Linux}"\n'   # the extras' defaults follow the OS; tests pick it
 UV = STUB + '''case "$1 $2" in
   "tool dir") if [[ "$*" == *--bin* ]]; then echo "$HOME/.local/bin"; else echo "$HOME/uv-tools"; fi ;;
   "tool list") for f in "$HOME"/uv-has-*; do [[ -e $f ]] && echo "${f##*/uv-has-} v0.1.0" && echo "- hx"; done ;;
@@ -28,7 +29,7 @@ esac
 def box(tmp_path):
     home, bin = tmp_path / "home", tmp_path / "bin"
     home.mkdir(); bin.mkdir()
-    for name, body in {"uv": UV, "trk": STUB, "herdr": STUB, "systemctl": STUB, "claude": STUB}.items():
+    for name, body in {"uv": UV, "trk": STUB, "herdr": STUB, "systemctl": STUB, "claude": STUB, "uname": UNAME}.items():
         (bin / name).write_text(body); (bin / name).chmod(0o755)
     (bin / "python3").write_text(f"#!/bin/sh\nexec {sys.executable} \"$@\"\n")   # this python, not the box's
     (bin / "python3").chmod(0o755)
@@ -39,7 +40,7 @@ def box(tmp_path):
         if ok:
             assert out.returncode == 0, out.stdout + out.stderr
         return out
-    run.home, run.bin = home, bin
+    run.home, run.bin, run.env = home, bin, env
     run.calls = lambda: (home / "calls.log").read_text() if (home / "calls.log").exists() else ""
     return run
 
@@ -520,7 +521,7 @@ def test_next_steps_say_the_sidebar_is_set_and_how_to_skip_it(box):
     assert "Agents panel now shows the needs-you list" in out and "--no-sidebar" in out
 
 
-# --- opt-in extras: launch guard and hooks ---
+# --- extras: claude-worker, launch guard and hooks, on by default ---
 
 def hook_commands(home):
     s = home / ".claude/settings.json"
@@ -530,10 +531,52 @@ def hook_commands(home):
     return {h["command"] for entries in hooks.values() for e in entries for h in e["hooks"]}
 
 
-def test_extras_stay_out_unless_asked_for(box):
+ALL_HOOKS = {f"{REPO.resolve()}/claude/hooks/mem-gate.sh", f"{REPO.resolve()}/claude/hooks/checkout-freshness.sh"}
+
+
+def test_on_linux_every_extra_is_on_by_default(box):
     box()
+    for b in ("launch-guard.sh", "claude-worker"):
+        assert (box.home / ".local/bin" / b).resolve() == (REPO / "scripts" / b).resolve()
+    assert hook_commands(box.home) == ALL_HOOKS
+
+
+def test_off_linux_the_proc_readers_are_skipped_unless_named(box):
+    box.env["FAKE_UNAME"] = "Darwin"
+    box()
+    assert (box.home / ".local/bin/claude-worker").is_symlink()
     assert not (box.home / ".local/bin/launch-guard.sh").exists()
-    assert not hook_commands(box.home)
+    assert hook_commands(box.home) == {f"{REPO.resolve()}/claude/hooks/checkout-freshness.sh"}
+    box("--launch-guard", "--mem-gate")
+    assert (box.home / ".local/bin/launch-guard.sh").is_symlink() and hook_commands(box.home) == ALL_HOOKS
+
+
+def test_each_extra_can_be_skipped(box):
+    box("--no-launch-guard", "--no-claude-worker", "--no-mem-gate", "--no-freshness-hook")
+    assert not list((box.home / ".local/bin").glob("*-*")) and not hook_commands(box.home)
+
+
+def test_someone_elses_worker_is_left_alone_unless_named_or_forced(box):
+    worker = box.home / ".local/bin/claude-worker"
+    worker.parent.mkdir(parents=True)
+    worker.write_text("#!/bin/bash\n# my own worker\n")
+    out = box()
+    assert "claude-worker: not ours" in out.stdout and "my own worker" in worker.read_text()
+    assert (box.home / ".local/bin/launch-guard.sh").is_symlink()
+    out = box("--claude-worker", ok=False)
+    assert out.returncode != 0 and "differ from the repo copy" in out.stderr
+    box("--force")
+    assert worker.is_symlink() and list(worker.parent.glob("claude-worker.bak-*"))
+
+
+def test_a_copy_an_earlier_release_installed_is_replaced(box):
+    box("--no-editable")
+    worker = box.home / ".local/bin/claude-worker"
+    worker.write_text("#!/bin/bash\n# an older release\n")    # as an earlier install left it, marker and all
+    import hashlib
+    (box.home / ".local/state/hx-install/bin-claude-worker").write_text(hashlib.sha256(worker.read_bytes()).hexdigest() + "\n")
+    box("--no-editable")
+    assert worker.read_text() == (REPO / "scripts/claude-worker").read_text()
 
 
 def test_extras_install_and_uninstall(box):
@@ -551,7 +594,7 @@ def test_extras_install_and_uninstall(box):
 
 
 def test_claude_worker_installs_beside_the_guard_and_uninstalls(box):
-    out = box("--claude-worker")
+    out = box("--claude-worker", "--no-launch-guard")
     worker = box.home / ".local/bin/claude-worker"
     assert worker.is_symlink() and worker.resolve() == (REPO / "scripts/claude-worker").resolve()
     assert not (box.home / ".local/bin/launch-guard.sh").exists()
@@ -588,7 +631,7 @@ def test_uninstall_leaves_a_guard_it_did_not_install(box):
     guard = box.home / ".local/bin/launch-guard.sh"
     guard.parent.mkdir(parents=True)
     guard.write_text("#!/bin/bash\n")
-    box()
+    assert "launch-guard.sh: not ours" in box().stdout
     assert "not installed by this script; leaving it alone" in box("--uninstall").stdout and guard.exists()
 
 

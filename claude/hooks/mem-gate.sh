@@ -6,7 +6,7 @@
 # Heavy means jest, vitest, tsc or playwright in command position, or npm test / type-check / build;
 # MEM_GATE_PATTERN (an extended regex matched against the command) replaces that list.
 # Disable: remove its entry from ~/.claude/settings.json hooks.PreToolUse, or export MEM_GATE_OFF=1.
-# MEM_GATE_MEMINFO (default /proc/meminfo) is for tests. Install: hx's install.sh --mem-gate.
+# MEM_GATE_MEMINFO (default /proc/meminfo) is for tests. hx's install.sh adds it (on Linux).
 
 [ -n "$MEM_GATE_OFF" ] && exit 0
 MIN_MB=${MEM_GATE_MB:-16384}

@@ -30,7 +30,7 @@ OVERRIDES = ("HERDR_HOLD_OVERRIDE", "DISPATCH_FORCE")   # launch-guard.sh's over
 
 
 def run_guard(label: str, check_only: bool) -> str | None:
-    """launch-guard.sh on PATH (scripts/launch-guard.sh; install.sh --launch-guard): None when the
+    """launch-guard.sh on PATH (scripts/launch-guard.sh; installed by install.sh on Linux): None when the
     box can take a session, else why not.
     A machine with no launch-guard.sh has no guard: every launch goes ahead."""
     if not any(os.path.exists(os.path.join(d, "launch-guard.sh"))     # present at all, runnable or not

@@ -7,7 +7,7 @@
 #
 # The base is BASE_BRANCH, else the remote's default branch (origin/HEAD), else develop, else main.
 # Contract: emits JSON on stdout with hookSpecificOutput.additionalContext, or nothing.
-# It must NEVER fail the session: every path exits 0. Install: hx's install.sh --freshness-hook.
+# It must NEVER fail the session: every path exits 0. hx's install.sh adds it.
 set -uo pipefail
 
 cd "${CLAUDE_PROJECT_DIR:-$PWD}" 2>/dev/null || exit 0
