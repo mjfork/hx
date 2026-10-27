@@ -66,8 +66,9 @@ Optional, used when present:
   (`scripts/launch-guard.sh`, installed by default on Linux); any `launch-guard.sh` on PATH is
   used. Without one, every `hx start` goes ahead.
 - **ticket-deps.sh**: fills a new worktree's `node_modules` in the background.
-- **The herdr needs-you queue** (`~/.herdr-queue`): the installer adds the `queue` channel when
-  that directory exists.
+- **The herdr needs-you queue** (`~/.herdr-queue`): the installer asks for the `queue` channel
+  whether or not that directory exists yet, and hx makes it when it first delivers there, so hx can
+  be installed before herdr-jump. Without herdr-jump the items simply sit there unread.
 
 ## Install
 
@@ -375,6 +376,8 @@ service.
 
 `hx --version` names what is installed, the `--no-editable` copy included, so a rerun can skip an install that is already at the commit it wants.
 
+A rerun also adds the `queue` channel to a config still on `channels = ["console"]`, with a backup beside it; it changes nothing else in a config that exists.
+
 **From herdr-extension** (hx's old name): pull, then run `./install.sh` once. It moves
 `~/.config/herdr-extension`, `~/.local/state/herdr-extension` and
 `~/.local/state/herdr-extension-install` to their `hx` names, stops and removes
@@ -402,6 +405,7 @@ installer added it. It never touches the config or the state directory; delete
 | Symptom | Look at |
 |---|---|
 | Asks do not show up | `systemctl --user status hx`, then `watch.log`. Check that the `[humans.*]` name is the trk actor the ask is addressed to (`trk waiting --all --json`) |
+| Asks reach the inbox log but never the ⚑ count | the config's `[humans.*]` table names no `queue` channel (older installs wrote `channels = ["console"]`). Rerunning the installer adds it to a list that is exactly `["console"]`, keeping a `config.toml.bak-hx-*` backup beside the config and saying which tables it changed. It leaves any other list, and a `[humans.*]` table with no `channels` line at all, for you: `channels = ["console", "queue"]` |
 | `ALERT hx watcher stopped acting` in the inbox | trk's replies no longer match the contract hx checks. Upgrade hx, or run `scripts/sync-contract.sh`, then restart the service |
 | `hx start` says `held: …` | launch-guard.sh refused the launch; its message says why. To launch anyway, run it with `HERDR_HOLD_OVERRIDE=1` (a hold) or `DISPATCH_FORCE=1` (load, memory, swap, disk): hx passes the override to the new pane, so claude-worker's own guard lets it through too, and claude-worker clears it for the session |
 | `hx start` says the item names no repo checkout | `trk edit <id> --add-repo <path>`: the path must be a git checkout |

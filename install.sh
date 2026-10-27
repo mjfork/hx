@@ -480,8 +480,9 @@ trk_contract() { # the contract dir of an editable trk checkout, if trk is one
 }
 
 render_config() {
-  local channels='"console"' contract
-  [[ -d $HOME/.herdr-queue ]] && channels='"console", "queue"'
+  # Both channels, whether or not ~/.herdr-queue is there yet: hx makes that directory when it first delivers to
+  # the queue, so this does not depend on herdr-jump, the workbench plugins, or the order the install steps run in.
+  local channels='"console", "queue"' contract
   contract=$(trk_contract)
   cat <<EOF
 # hx config. See README.md, "Configuration".
@@ -507,9 +508,60 @@ EOF
   fi
 }
 
+# An older install wrote channels = ["console"], so its asks reach the inbox log but never the needs-you count.
+# Adds "queue" to a list that is exactly ["console"] under a [humans.*] table, and leaves every other list, and
+# every humans table with no channels line, for a person: `fixed=` and `hands=` name which is which.
+QUEUE_FIX_AWK='
+function close_table() { if (tbl ~ /^humans\./ && !seen) { hands = hands (hands ? ", " : "") "[" tbl "]" } }
+/^[ \t]*\[/ { close_table(); tbl = $0; sub(/^[ \t]*\[+/, "", tbl); sub(/\].*$/, "", tbl); seen = 0 }
+{
+  line = $0
+  if (tbl ~ /^humans\./ && line ~ /^[ \t]*channels[ \t]*=/) {
+    seen = 1
+    if (line !~ /"queue"/) {
+      if (line ~ /^[ \t]*channels[ \t]*=[ \t]*\[[ \t]*"console"[ \t]*\][ \t]*(#.*)?$/) {
+        sub(/\[[ \t]*"console"[ \t]*\]/, "[\"console\", \"queue\"]", line)
+        fixed = fixed (fixed ? ", " : "") "[" tbl "]"
+      } else { hands = hands (hands ? ", " : "") "[" tbl "]" }
+    }
+  }
+  print line > OUT
+}
+END { close_table(); printf "fixed=%s\nhands=%s\n", fixed, hands }
+'
+
+fix_queue_channel() {
+  local tmp report fixed hands stamp backup
+  tmp=$(mktemp) || { warn "no temp file, so $CONFIG was not checked for the queue channel"; return 0; }
+  if ! report=$(awk -v OUT="$tmp" "$QUEUE_FIX_AWK" "$CONFIG"); then
+    rm -f "$tmp"; warn "$CONFIG could not be read, so its channels are unchecked"; return 0
+  fi
+  fixed=$(printf '%s\n' "$report" | sed -n 's/^fixed=//p')
+  hands=$(printf '%s\n' "$report" | sed -n 's/^hands=//p')
+  if [[ -n $fixed ]]; then
+    if ((DRY)); then
+      say "[dry-run] adding the queue channel to $fixed in $CONFIG, after a .bak-hx-* backup beside it"
+    else
+      stamp=$(date -u +%Y%m%dT%H%M%SZ); backup=$CONFIG.bak-hx-$stamp
+      if cp "$CONFIG" "$backup" && cat "$tmp" >"$CONFIG"; then
+        say "added the queue channel to $fixed in $CONFIG, so its trk asks reach herdr's needs-you count (backup: $backup)"
+      else
+        warn "$CONFIG could not be rewritten; add it yourself under $fixed: channels = [\"console\", \"queue\"]"
+      fi
+    fi
+  fi
+  rm -f "$tmp"
+  [[ -n $hands ]] && warn "$CONFIG: $hands name no \"queue\" channel, so their trk asks will not reach herdr's needs-you count. Add it: channels = [\"console\", \"queue\"]"
+  return 0
+}
+
 install_config() {
   say "== config"
-  if [[ -e $CONFIG ]]; then say "config exists at $CONFIG; leaving it alone"; return; fi
+  if [[ -e $CONFIG ]]; then
+    say "config exists at $CONFIG; leaving its own settings alone"
+    fix_queue_channel
+    return
+  fi
   say "writing $CONFIG (asks go to '$ME')"
   if ((DRY)); then render_config | sed 's/^/[dry-run]   /'; return; fi
   mkdir -p "$(dirname "$CONFIG")"

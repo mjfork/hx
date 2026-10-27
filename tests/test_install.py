@@ -7,6 +7,12 @@ from pathlib import Path
 
 import pytest
 
+from hx.config import load_config
+from hx.herdr import Pane
+from hx.reconcile import reconcile
+from hx.tracker import Trk
+from tests.conftest import FakeHerdr
+
 REPO = Path(__file__).parent.parent
 SCRIPT = REPO / "install.sh"
 STUB = '#!/bin/bash\necho "$(basename "$0") $*" >> "$HOME/calls.log"\n'
@@ -87,7 +93,7 @@ def test_install_puts_everything_in_place(box):
     skill = box.home / ".claude/skills/hx-work"
     assert skill.is_symlink() and skill.resolve() == (REPO / "claude/skills/hx-work").resolve()
     cfg = (box.home / ".config/hx/config.toml").read_text()
-    assert '[humans.alice]\nchannels = ["console"]' in cfg
+    assert '[humans.alice]\nchannels = ["console", "queue"]' in cfg
     unit = (box.home / ".config/systemd/user/hx.service").read_text()
     assert f"ExecStart={box.home}/.local/bin/hx watch" in unit and "@" not in unit
     assert "systemctl --user enable hx" in box.calls()
@@ -102,11 +108,93 @@ def test_install_twice_is_safe_and_keeps_the_config(box):
     assert cfg.read_text() == "# mine\n" and "already installed" in out.stdout
 
 
-def test_me_and_queue_channel(box):
-    (box.home / ".herdr-queue").mkdir()
+def test_me_and_the_queue_channel_without_the_queue_directory(box):
+    """A fresh machine has no ~/.herdr-queue: herdr-jump makes it at runtime, and hx makes it when it first
+    delivers. The config asks for the channel either way, so no install order can leave asks out of the count."""
     box("--me", "bob")
-    cfg = (box.home / ".config/hx/config.toml").read_text()
-    assert '[humans.bob]\nchannels = ["console", "queue"]' in cfg
+    assert not (box.home / ".herdr-queue").exists()
+    cfg = box.home / ".config/hx/config.toml"
+    assert '[humans.bob]\nchannels = ["console", "queue"]' in cfg.read_text()
+    assert load_config(cfg).humans == {"bob": ["console", "queue"]}   # what hx reads back: both channels
+
+
+def console_only(box, body='[humans.alice]\nchannels = ["console"]\n'):
+    """The config an older installer left on the boxes: its asks reach the inbox log, never the ⚑ count."""
+    cfg = box.home / ".config/hx/config.toml"
+    cfg.parent.mkdir(parents=True)
+    cfg.write_text(body)
+    return cfg
+
+
+def test_a_config_stuck_on_console_only_is_repaired_and_backed_up(box):
+    cfg = console_only(box)
+
+    out = box()
+
+    assert cfg.read_text() == '[humans.alice]\nchannels = ["console", "queue"]\n'
+    backup = next(cfg.parent.glob("config.toml.bak-hx-*"))
+    assert backup.read_text() == '[humans.alice]\nchannels = ["console"]\n'
+    assert "added the queue channel to [humans.alice]" in out.stdout and str(backup) in out.stdout
+    assert load_config(cfg).humans == {"alice": ["console", "queue"]}
+
+
+def test_a_repair_keeps_the_rest_of_the_config_and_the_comments(box):
+    cfg = console_only(box, '# mine\n[humans.alice]\nchannels = [ "console" ]   # just me\nmodel = "x"\n\n'
+                            '[spaces]\nclose_delay_s = 60\n')
+
+    box()
+
+    assert cfg.read_text() == ('# mine\n[humans.alice]\nchannels = ["console", "queue"]   # just me\nmodel = "x"\n'
+                               '\n[spaces]\nclose_delay_s = 60\n')
+
+
+def test_any_other_channel_list_is_left_alone_with_a_warning(box):
+    """Only a list that is exactly ["console"] is safe to rewrite; the rest is a person's call."""
+    body = '[humans.alice]\nchannels = ["console", "inbox"]\n\n[humans.bob]\nmodel = "x"\n'
+    cfg = console_only(box, body)
+
+    out = box()
+
+    assert cfg.read_text() == body and not list(cfg.parent.glob("config.toml.bak-hx-*"))
+    assert "[humans.alice], [humans.bob] name no \"queue\" channel" in out.stdout   # warn() prints on stdout
+    assert 'channels = ["console", "queue"]' in out.stdout
+
+
+def test_a_config_that_names_the_queue_is_left_as_it_is(box):
+    box()
+    cfg = box.home / ".config/hx/config.toml"
+    before = cfg.read_text()
+
+    out = box()
+
+    assert cfg.read_text() == before and not list(cfg.parent.glob("config.toml.bak-hx-*"))
+    assert 'names no "queue" channel' not in out.stdout and "added the queue channel" not in out.stdout
+
+
+def test_dry_run_only_talks_about_repairing_the_config(box):
+    cfg = console_only(box)
+
+    out = box("--dry-run")
+
+    assert cfg.read_text() == '[humans.alice]\nchannels = ["console"]\n'
+    assert not list(cfg.parent.glob("config.toml.bak-hx-*"))
+    assert "[dry-run] adding the queue channel to [humans.alice]" in out.stdout
+
+
+def test_a_fresh_install_lands_an_open_ask_in_the_queue(box, trk_home, sh, tree, tmp_path):
+    """The whole chain, with hx's own delivery: the installer writes the config on a machine with no
+    ~/.herdr-queue, hx reads it back, and an open trk ask becomes an item in ~/.herdr-queue/default."""
+    box("--me", "michael")
+    cfg = load_config(box.home / ".config/hx/config.toml")
+    queue = box.home / ".herdr-queue/default"      # the unit and herdr-jump's needs-you.sh name this one
+    assert not queue.exists()
+    ask = sh("ask", tree["ticket"], "Colour?", "--to", "product", "--question", "-",
+             "--as", "worker", "--session", "s-worker", stdin="Which colour?")["item"]["id"]
+
+    reconcile(Trk(home=str(trk_home)), FakeHerdr([Pane("w1:p2", "w1", "s-worker", "done", "/")]),
+              tmp_path / "state.json", tmp_path / "inbox.log", queue, cfg.humans, dry_run=False)
+
+    assert json.loads((queue / f"hx_{ask}.json").read_text())["pane"] == "w1:p2"
 
 
 def test_no_editable_copies_the_skill(box):
