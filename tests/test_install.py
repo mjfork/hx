@@ -624,7 +624,7 @@ ALL_HOOKS = {f"{REPO.resolve()}/claude/hooks/mem-gate.sh", f"{REPO.resolve()}/cl
 
 def test_on_linux_every_extra_is_on_by_default(box):
     box()
-    for b in ("launch-guard.sh", "claude-worker"):
+    for b in ("launch-guard.sh", "claude-worker", "claude-sme"):
         assert (box.home / ".local/bin" / b).resolve() == (REPO / "scripts" / b).resolve()
     assert hook_commands(box.home) == ALL_HOOKS
 

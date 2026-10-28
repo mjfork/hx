@@ -97,13 +97,13 @@ def test_an_expired_hold_or_the_override_lets_the_launch_through(guard):
     assert guard("tr-abc12", HERDR_HOLD_OVERRIDE="1").returncode == 0
 
 
-# --- claude-worker ---
+# --- claude-worker and claude-sme ---
 
 WORKER = REPO / "scripts/claude-worker"
+SME = REPO / "scripts/claude-sme"
 
 
-@pytest.fixture
-def worker(tmp_path):
+def _launcher(tmp_path, script):
     bin = tmp_path / "bin"
     bin.mkdir()
     (bin / "claude").write_text('#!/bin/bash\nprintf "%s\\n" "$@" > "$HOME/claude-args"\n')
@@ -111,11 +111,21 @@ def worker(tmp_path):
     env = {"HOME": str(tmp_path), "PATH": f"{bin}:/usr/bin:/bin"}
 
     def run(*args, **extra):
-        out = subprocess.run(["bash", str(WORKER), *args], capture_output=True, text=True, env={**env, **extra})
+        out = subprocess.run(["bash", str(script), *args], capture_output=True, text=True, env={**env, **extra})
         argv = (tmp_path / "claude-args").read_text().splitlines() if (tmp_path / "claude-args").exists() else None
         return out, argv
     run.bin = bin
     return run
+
+
+@pytest.fixture
+def worker(tmp_path):
+    return _launcher(tmp_path, WORKER)
+
+
+@pytest.fixture
+def sme(tmp_path):
+    return _launcher(tmp_path, SME)
 
 
 def test_worker_starts_claude_with_a_250k_compact_window(worker):
@@ -125,9 +135,36 @@ def test_worker_starts_claude_with_a_250k_compact_window(worker):
                     "--model", "m", "-w", "tree", "/hx-work tr-a"]
 
 
-def test_worker_window_comes_from_the_env(worker):
-    _, argv = worker("x", CLAUDE_CODE_AUTO_COMPACT_WINDOW="400000")
+def test_worker_window_comes_from_its_own_variable(worker):
+    _, argv = worker("x", CLAUDE_WORKER_WINDOW="400000")
     assert argv[1] == '{"env":{"CLAUDE_CODE_AUTO_COMPACT_WINDOW":"400000"}}'
+
+
+def test_worker_never_inherits_a_coordinators_window(worker):
+    # A driver started by claude-sme carries 500k in its environment; the workers it starts stay at 250k.
+    _, argv = worker("x", CLAUDE_CODE_AUTO_COMPACT_WINDOW="500000")
+    assert argv[1] == '{"env":{"CLAUDE_CODE_AUTO_COMPACT_WINDOW":"250000"}}'
+
+
+def test_sme_starts_claude_with_a_500k_compact_window(sme):
+    out, argv = sme("--model", "m", "/trk-drive-program tr-a")
+    assert out.returncode == 0, out.stderr
+    assert argv == ["--settings", '{"env":{"CLAUDE_CODE_AUTO_COMPACT_WINDOW":"500000"}}',
+                    "--model", "m", "/trk-drive-program tr-a"]
+
+
+def test_sme_window_comes_from_its_own_variable_never_an_inherited_one(sme):
+    _, argv = sme("x", CLAUDE_CODE_AUTO_COMPACT_WINDOW="250000")
+    assert argv[1] == '{"env":{"CLAUDE_CODE_AUTO_COMPACT_WINDOW":"500000"}}'
+    _, argv = sme("x", CLAUDE_SME_WINDOW="800000", CLAUDE_CODE_AUTO_COMPACT_WINDOW="250000")
+    assert argv[1] == '{"env":{"CLAUDE_CODE_AUTO_COMPACT_WINDOW":"800000"}}'
+
+
+def test_sme_refuses_while_the_guard_holds(sme):
+    (sme.bin / "launch-guard.sh").write_text('#!/bin/bash\necho "held: $*" >&2\nexit 3\n')
+    (sme.bin / "launch-guard.sh").chmod(0o755)
+    out, argv = sme("x")
+    assert out.returncode == 3 and "held: --hold-only claude-sme" in out.stderr and argv is None
 
 
 def test_worker_refuses_while_the_guard_holds_and_runs_without_a_guard(worker):

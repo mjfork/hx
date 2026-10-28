@@ -1,18 +1,21 @@
 #!/bin/bash
 # claude-worker: start a child (worker) Claude session with a hard auto-compact backstop.
-# Use it for ticket and trk workers and other long single-task sessions, never for coordinators:
-# a worker that compacts early re-sends far less context on every turn.
+# Use it for ticket and trk workers and other long single-task sessions, never for coordinators
+# (they start through claude-sme): a worker that compacts early re-sends far less context on every turn.
 # Auto-compact fires about 11-19K below the window (measured: window 80K fired at 68.8K).
 # hx start runs solo sessions under it when it is on PATH; hx's install.sh puts it there.
 if [[ "${1:-}" == "--help" ]]; then
-  echo "usage: claude-worker [claude args...]   (CLAUDE_CODE_AUTO_COMPACT_WINDOW defaults to 250000)"
+  echo "usage: claude-worker [claude args...]   (CLAUDE_WORKER_WINDOW defaults to 250000)"
   exit 0
 fi
 # Refuse while a machine-wide hold is on (hx hold; see launch-guard.sh). HERDR_HOLD_OVERRIDE=1 skips it.
 if command -v launch-guard.sh >/dev/null; then launch-guard.sh --hold-only claude-worker || exit $?; fi
 # The override was for this launch alone: the session's own launches go through the guard again.
 unset HERDR_HOLD_OVERRIDE DISPATCH_FORCE
-export CLAUDE_CODE_AUTO_COMPACT_WINDOW="${CLAUDE_CODE_AUTO_COMPACT_WINDOW:-250000}"
+# Its own variable, never the shared CLAUDE_CODE_AUTO_COMPACT_WINDOW: a driver started by claude-sme carries
+# that in its environment, and every worker it starts would inherit the driver's larger window.
+window="${CLAUDE_WORKER_WINDOW:-250000}"
+export CLAUDE_CODE_AUTO_COMPACT_WINDOW="$window"
 # An env set in settings.json (a coordinator's larger cap, say) overrides the process env, but
 # --settings outranks the settings files, so pass the worker window as a flag too.
-exec claude --settings "{\"env\":{\"CLAUDE_CODE_AUTO_COMPACT_WINDOW\":\"$CLAUDE_CODE_AUTO_COMPACT_WINDOW\"}}" "$@"
+exec claude --settings "{\"env\":{\"CLAUDE_CODE_AUTO_COMPACT_WINDOW\":\"$window\"}}" "$@"

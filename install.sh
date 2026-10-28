@@ -13,8 +13,8 @@ shopt -u patsub_replacement 2>/dev/null || true   # bash 5.2: keep & in a path l
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
 SKILLS=(hx-work)
 UNIT=hx.service
-GUARD=launch-guard.sh   # the launch guard and claude-worker go on PATH, where hx start finds them
-ALL_BINS=($GUARD claude-worker)
+GUARD=launch-guard.sh   # the launch guard and the launchers go on PATH, where hx start finds them
+ALL_BINS=($GUARD claude-worker claude-sme)
 OLD=herdr-extension      # hx's name before the rename: its folders, unit and uv tool move over
 
 DRY=0 UNINSTALL=0 EDITABLE=1 FORCE=0 SERVICE=1 SIDEBAR=1 ME=${USER:-$(id -un)} MODE=install BUNDLE=
@@ -43,9 +43,10 @@ Options:
                   differs from the repo copy (the old one is kept as ~/.local/share/hx-skill-backups/)
   --me NAME       the trk actor who hears asks, for a new config (default: your user name)
   --no-claude-worker
-                  skip claude-worker, which goes on PATH (~/.local/bin): solo sessions run under it
-                  and auto-compact at 250k tokens (CLAUDE_CODE_AUTO_COMPACT_WINDOW), re-sending
-                  less context each turn
+                  skip the launchers claude-worker and claude-sme, which go on PATH (~/.local/bin):
+                  solo sessions run under claude-worker and auto-compact at 250k tokens
+                  (CLAUDE_WORKER_WINDOW), re-sending less context each turn; start coordinators,
+                  drivers and SMEs with claude-sme, which pins 500k (CLAUDE_SME_WINDOW)
   --no-launch-guard
                   skip launch-guard.sh, which goes on PATH: hx start waits while the box is held,
                   loaded, short of memory, swap or disk, or launched a session under 30s ago
@@ -295,7 +296,7 @@ uninstall_bins() {
 # The hooks run from this checkout, as trk's do; --no-editable does not copy them.
 BINS=()
 ((LAUNCH_GUARD)) && BINS+=("$GUARD")
-((CLAUDE_WORKER)) && BINS+=(claude-worker)
+((CLAUDE_WORKER)) && BINS+=(claude-worker claude-sme)
 
 MEM_HOOK=(--hook PreToolUse Bash "$REPO/claude/hooks/mem-gate.sh")
 FRESH_HOOK=(--hook SessionStart "" "$REPO/claude/hooks/checkout-freshness.sh")
@@ -717,7 +718,7 @@ next_steps() {
 EOF
   local n=7
   ((LAUNCH_GUARD)) && { say "$n. Tune the launch guard's limits with the DISPATCH_* variables in the header of scripts/$GUARD."; n=$((n + 1)); }
-  ((CLAUDE_WORKER)) && { say "$n. Solo sessions now run under claude-worker; CLAUDE_CODE_AUTO_COMPACT_WINDOW changes its 250k window."; n=$((n + 1)); }
+  ((CLAUDE_WORKER)) && { say "$n. Solo sessions now run under claude-worker (CLAUDE_WORKER_WINDOW changes its 250k window); start coordinators, drivers and SMEs with claude-sme (500k, CLAUDE_SME_WINDOW)."; n=$((n + 1)); }
   ((MEM_GATE || FRESHNESS)) && say "$n. Restart Claude Code sessions so they load the new hooks."
   return 0
 }

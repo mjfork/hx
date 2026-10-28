@@ -1,0 +1,18 @@
+#!/bin/bash
+# claude-sme: start a long-lived Claude session (a coordinator, a driver or an SME) with a pinned
+# auto-compact window. Left unset, Claude Code picks the window itself, and its default differs between
+# versions; a window in settings.json would lift every worker too. So it is set per launch, here.
+# Workers start through claude-worker, never this.
+if [[ "${1:-}" == "--help" ]]; then
+  echo "usage: claude-sme [claude args...]   (CLAUDE_SME_WINDOW defaults to 500000)"
+  exit 0
+fi
+# Refuse while a machine-wide hold is on (hx hold; see launch-guard.sh). HERDR_HOLD_OVERRIDE=1 skips it.
+if command -v launch-guard.sh >/dev/null; then launch-guard.sh --hold-only claude-sme || exit $?; fi
+# The override was for this launch alone: the session's own launches go through the guard again.
+unset HERDR_HOLD_OVERRIDE DISPATCH_FORCE
+# Its own variable, never an inherited CLAUDE_CODE_AUTO_COMPACT_WINDOW (a worker's 250k, say).
+window="${CLAUDE_SME_WINDOW:-500000}"
+export CLAUDE_CODE_AUTO_COMPACT_WINDOW="$window"
+# --settings outranks the settings files, so a window there does not override this one.
+exec claude --settings "{\"env\":{\"CLAUDE_CODE_AUTO_COMPACT_WINDOW\":\"$window\"}}" "$@"

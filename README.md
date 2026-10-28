@@ -57,8 +57,9 @@ herdr holds the Claude Code sessions. hx is a small background watcher in betwee
 Optional, used when present:
 
 - **claude-worker**: a wrapper around `claude` that makes a worker session auto-compact at 250k
-  tokens. hx ships one (`scripts/claude-worker`, installed by default). If it is on
-  PATH, solo sessions run under it; otherwise they run under `claude`.
+  tokens. hx ships one (`scripts/claude-worker`, installed by default, with `claude-sme` for
+  long-lived sessions at 500k). If it is on PATH, solo sessions run under it; otherwise they run
+  under `claude`.
 - **eng-toolkit** (Claude Code plugin): for a work item with a JIRA key, the hx-work skill
   hands each stage gate to its kickoff, implement and verification skills. Without it, the skill
   runs the gates itself.
@@ -138,11 +139,16 @@ hook `settings.json` already runs from elsewhere (its own `mem-gate.sh`, say) is
   replace a different `launch-guard.sh` unless you pass `--force`; the old one is kept as
   `launch-guard.sh.bak-<time>`.
 - claude-worker links `scripts/claude-worker` into `~/.local/bin`, and solo sessions run under
-  it. It starts `claude` with `CLAUDE_CODE_AUTO_COMPACT_WINDOW` at 250000 (set the variable to
-  change it), passed as `--settings` so a larger window in your `settings.json` does not override
-  it. A worker that compacts early re-sends far less context on each turn. Use it for any worker
-  you start yourself too; keep coordinators on plain `claude`. While a launch guard is installed,
-  it also refuses to start during a machine-wide hold.
+  it. It starts `claude` with `CLAUDE_CODE_AUTO_COMPACT_WINDOW` at 250000 (set
+  `CLAUDE_WORKER_WINDOW` to change it), passed as `--settings` so a larger window in your
+  `settings.json` does not override it. It never takes an inherited
+  `CLAUDE_CODE_AUTO_COMPACT_WINDOW`, so a worker started by a coordinator stays at 250k. A worker
+  that compacts early re-sends far less context on each turn. Use it for any worker you start
+  yourself too. While a launch guard is installed, it also refuses to start during a machine-wide
+  hold.
+- claude-sme is installed beside it: start coordinators, drivers and SMEs with it. It pins their
+  window at 500000 (`CLAUDE_SME_WINDOW` changes it), where Claude Code's own default differs
+  between versions, and refuses during a hold the same way.
 - The memory gate adds `claude/hooks/mem-gate.sh` to `~/.claude/settings.json` as a PreToolUse hook on
   Bash. While less than 16 GB of memory is free (`MEM_GATE_MB`) or 20 test processes run
   (`MEM_GATE_MAX_PROCS`), it turns away heavy commands (jest, vitest, tsc, playwright, npm
@@ -165,7 +171,7 @@ yourself to tell sessions that start during a hold.
 | `--no-service` | skip the systemd service; run `hx watch` yourself |
 | `--no-sidebar` | leave herdr's `config.toml` alone: no needs-you list in the Agents panel |
 | `--force` | reinstall the command and replace a differing skill, launch guard or claude-worker |
-| `--no-claude-worker` | skip `claude-worker`, which makes solo sessions auto-compact at 250k tokens |
+| `--no-claude-worker` | skip `claude-worker` (solo sessions auto-compact at 250k tokens) and `claude-sme` (500k, for coordinators) |
 | `--no-launch-guard` | skip `launch-guard.sh`, which makes `hx start` wait while the box is busy |
 | `--no-mem-gate` | skip the memory-gate hook for heavy test and build commands |
 | `--no-freshness-hook` | skip the hook that tells a session its checkout is stale |
@@ -395,7 +401,7 @@ trk checkout, hx already uses the current contract.
 ./install.sh --uninstall
 ```
 
-This stops and removes the service, removes the skill, the launch guard and claude-worker if you
+This stops and removes the service, removes the skill, the launch guard and the launchers if you
 have not edited them, takes hx's own hooks out of `~/.claude/settings.json`, and removes the `hx` command if the
 installer added it. It never touches the config or the state directory; delete
 `~/.config/hx` and `~/.local/state/hx` yourself if you want them gone.
@@ -437,6 +443,7 @@ The tests need `trk` on PATH. The design, its amendments and the implementation 
 | `scripts/sync-contract.sh` | refresh the contract copy from a trk checkout |
 | `scripts/launch-guard.sh` | says whether the box can take another session (installed by default on Linux) |
 | `scripts/claude-worker` | starts a worker session that auto-compacts at 250k tokens (installed by default) |
+| `scripts/claude-sme` | starts a coordinator, driver or SME session pinned at 500k (installed with claude-worker) |
 | `scripts/merge_settings.py` | adds and removes hx's hooks in `settings.json` |
 | `claude/hooks/` | Claude Code hooks: `hold-notice.sh`, `mem-gate.sh`, `checkout-freshness.sh` |
 | `tests/` | the suite |
