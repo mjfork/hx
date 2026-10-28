@@ -60,9 +60,9 @@ Optional, used when present:
   tokens. hx ships one (`scripts/claude-worker`, installed by default, with `claude-sme` for
   long-lived sessions at 500k). If it is on PATH, solo sessions run under it; otherwise they run
   under `claude`.
-- **eng-toolkit** (Claude Code plugin): for a work item with a JIRA key, the hx-work skill
-  hands each stage gate to its kickoff, implement and verification skills. Without it, the skill
-  runs the gates itself.
+- **`~/.config/hx/hx-work.md`**: this machine's own steps for the hx-work skill's stages, such as
+  a ticket toolkit's skills to call (see [Your own stage steps](#your-own-stage-steps)). Without
+  it, the skill does every stage itself.
 - **launch-guard.sh**: holds a launch when the machine is busy. hx ships one
   (`scripts/launch-guard.sh`, installed by default on Linux); any `launch-guard.sh` on PATH is
   used. Without one, every `hx start` goes ahead.
@@ -272,6 +272,26 @@ contract = "~/src/trk/contract"
 ```
 
 With no config file, asks go to your user name on the console channel only.
+
+### Your own stage steps
+
+The hx-work skill takes a work item through trk's stages, doing each stage's work itself. To have
+it do some stages your way (call your team's ticket skills, follow a review rule), write the steps
+in plain English in `~/.config/hx/hx-work.md` (`$XDG_CONFIG_HOME/hx/hx-work.md` when that is set).
+A solo session reads the file before it starts and follows it for each stage it covers; trk's
+gates still decide when the item moves on. A stage the file does not cover, or a skill it names
+that is not installed, falls back to the skill's own steps. For example:
+
+```markdown
+When the work item has a JIRA key:
+- framed: run `/eng-toolkit:kickoff-ticket <KEY>`, then write the agreed approach into the item's sections.
+- specd to merged: run `/eng-toolkit:implement-ticket <KEY>`.
+- merged: run `/eng-toolkit:mark-ticket-for-verification <KEY>`.
+
+Every pull request needs two approving reviews before it merges.
+```
+
+The installer says whether it found the file. It never writes or changes it.
 
 **Environment variables**
 

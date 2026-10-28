@@ -1,6 +1,6 @@
 ---
 name: hx-work
-description: Work one trk root as the solo session of its hx Space, from claim to verified through the trk stage gates (with the eng-toolkit skills where that plugin is installed). Use when a session starts with `/hx-work <tr-id>` (hx start runs it in tab 1 of a solo Space, with HX_ROLE=solo), or when told to resume one.
+description: Work one trk root as the solo session of its hx Space, from claim to verified through the trk stage gates (following this machine's own stage steps where it has an hx-work.md). Use when a session starts with `/hx-work <tr-id>` (hx start runs it in tab 1 of a solo Space, with HX_ROLE=solo), or when told to resume one.
 ---
 
 # Work a root solo
@@ -32,15 +32,9 @@ You are already in the work item's own worktree (`claude -w`). Where `ticket-dep
 
 Follow the stages `framed → specd → built → merged → verified`. `trk advance` moves one stage, and it names what is missing when it refuses.
 
-If the eng-toolkit plugin is installed and the root has a JIRA key, call these skills with that key; do not restate their steps:
+This machine may have its own steps for some stages: `${XDG_CONFIG_HOME:-$HOME/.config}/hx/hx-work.md`. If that file exists, read it before you start. Where it gives steps for a stage (for example, a toolkit skill to call when the root has a JIRA key), follow them for that stage in place of the row below; do not restate the steps of a skill it names. The trk column still applies: its gates decide whether the root moves on, whoever does the work. If the file names a skill that is not installed, or gives no steps for a stage, use the row below.
 
-| Stage you are at | Call | Then in trk |
-|---|---|---|
-| framed | `/eng-toolkit:kickoff-ticket <KEY>` | Write the agreed framing and approach into the root's sections, then `trk advance "$HX_ROOT" --judgment "<why it is complete>"` |
-| specd → built → merged | `/eng-toolkit:implement-ticket <KEY>` | The `pr` and `test-run` evidence at the head, `trk blast-radius`, the `merge` evidence, then `trk advance` at each step |
-| merged → verified | `/eng-toolkit:mark-ticket-for-verification <KEY>` | One passing verified run per live criterion, the `resolution` section, then `trk advance "$HX_ROOT" --outcome "<one sentence>"` |
-
-Without eng-toolkit (or with no JIRA key), do the work yourself. Each row is what you do at that stage so that its gate lets you into the next one:
+Otherwise do the work yourself. Each row is what you do at that stage so that its gate lets you into the next one:
 
 | Stage you are at | Do | Then in trk |
 |---|---|---|

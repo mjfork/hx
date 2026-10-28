@@ -413,9 +413,8 @@ check_prereqs() {
   command -v claude >/dev/null || warn "claude (Claude Code) is not on PATH; hx start launches sessions with it"
   if command -v claude-worker >/dev/null; then say "claude-worker found: solo sessions run under it"
   else say "claude-worker not found: solo sessions run under plain claude"; fi
-  if grep -qs '"eng-toolkit@' "$CLAUDE_DIR/plugins/installed_plugins.json"; then
-    say "eng-toolkit found: hx-work hands JIRA tickets' gates to it"
-  else say "eng-toolkit not found: hx-work runs the trk gates itself"; fi
+  if [[ -e $CONFIG_HOME/hx/hx-work.md ]]; then say "$CONFIG_HOME/hx/hx-work.md found: hx-work follows its stage steps"
+  else say "no $CONFIG_HOME/hx/hx-work.md: hx-work does every stage itself"; fi
   say "$PY, uv, trk and herdr found"
 }
 
