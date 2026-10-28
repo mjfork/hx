@@ -14,8 +14,11 @@ def trk_home(tmp_path, monkeypatch):
     home.mkdir()
     monkeypatch.setenv("TRK_HOME", str(home))
     run(home, "init", "--me", "michael")
-    run(home, "actor", "add", "worker", "--kind", "agent")
-    run(home, "actor", "add", "orchestrator", "--kind", "agent")
+    # newer trk registers the worker agent at init
+    have = {a["id"] for a in run(home, "actors")["actors"]}
+    for actor in ("worker", "orchestrator"):
+        if actor not in have:
+            run(home, "actor", "add", actor, "--kind", "agent")
     return home
 
 
